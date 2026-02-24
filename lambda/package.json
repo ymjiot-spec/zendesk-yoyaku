@@ -1,0 +1,25 @@
+{
+  "name": "zendesk-ticket-summarizer",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for summarizing Zendesk ticket history using Amazon Bedrock",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "vitest --run"
+  },
+  "keywords": [
+    "zendesk",
+    "bedrock",
+    "lambda",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0"
+  },
+  "devDependencies": {
+    "fast-check": "^4.5.3",
+    "vitest": "^4.0.17"
+  }
+}

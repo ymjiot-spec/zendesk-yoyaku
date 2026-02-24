@@ -1,0 +1,10 @@
+{
+  "app_id": null,
+  "plan": null,
+  "subdomain": "starservicesupport",
+  "username": null,
+  "parameters": {
+    "api_endpoint": "https://dummy.execute-api.us-east-1.amazonaws.com/prod/summarize",
+    "api_key": "dummy-key-for-testing"
+  }
+}

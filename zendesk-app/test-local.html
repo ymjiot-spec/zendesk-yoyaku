@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ローカルテスト - 顧客リスク分析</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    body {
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-container {
+      max-width: 400px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .test-info {
+      background: #e3f2fd;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <div class="test-info">
+      <strong>ローカルテストモード</strong><br>
+      このページはZendesk環境外でのテスト用です。<br>
+      実際の動作確認はZendeskアプリとしてインストールしてください。
+    </div>
+    
+    <div id="app-root">
+      <div id="app">
+        <!-- ローディング -->
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <p>読み込み中...</p>
+        </div>
+
+        <!-- エラー表示 -->
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <!-- メインコンテンツ -->
+        <div id="content" style="display: none;">
+        
+        <!-- 要約ボタン（上部固定） -->
+        <div class="summary-button-top sticky">
+          <button id="summarize-btn-top" class="btn-primary">
+            📝 要約する
+          </button>
+        </div>
+
+        <!-- 要約結果エリア（LINE風チャット） -->
+        <div id="summary-container" class="summary-container" style="display: none;">
+          <div class="summary-header">
+            <h3>📋 AI要約</h3>
+            <button id="close-summary" class="btn-close">×</button>
+          </div>
+          <div id="summary-content" class="chat-container"></div>
+        </div>
+
+        <!-- 顧客リスク指標 -->
+        <div id="customer-risk" class="risk-panel">
+          <h3>⚠️ 顧客リスク指標</h3>
+          <div class="risk-meter">
+            <div id="risk-level" class="risk-level">通常</div>
+            <div class="risk-bar">
+              <div id="risk-bar-fill" class="risk-bar-fill" style="width: 0%"></div>
+            </div>
+            <div id="risk-score" class="risk-score">0</div>
+          </div>
+          <div id="risk-details" class="risk-details"></div>
+        </div>
+
+        <!-- チケット履歴一覧 -->
+        <div id="ticket-history" class="ticket-history">
+          <h3>📜 過去の問い合わせ履歴</h3>
+          <div id="ticket-list" class="ticket-list"></div>
+          <div id="no-tickets" class="no-tickets" style="display: none;">
+            過去のチケットはありません
+          </div>
+        </div>
+
+        <!-- 要約ボタン（下部） -->
+        <div class="summary-button-bottom">
+          <button id="summarize-btn-bottom" class="btn-primary">
+            📝 要約する
+          </button>
+        </div>
+
+        <!-- 要注意メモ -->
+        <div id="alert-memo" class="alert-memo">
+          <h3>⚡ 要注意メモ</h3>
+          <div id="existing-memos" class="existing-memos"></div>
+          <textarea id="memo-input" class="memo-input" placeholder="この顧客に関する注意事項を入力..."></textarea>
+          <button id="save-memo-btn" class="btn-secondary">💾 メモを保存</button>
+        </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- ZAF SDKのモック -->
+  <script>
+    // ZAFClientのモック実装
+    window.ZAFClient = {
+      init: function() {
+        console.log('Mock ZAFClient initialized');
+        return {
+          get: async function(key) {
+            console.log('Mock get:', key);
+            if (key === 'currentUser') {
+              return { 'currentUser': { id: 1, name: 'Test User' } };
+            }
+            if (key === 'ticket.requester') {
+              return { 
+                'ticket.requester': { 
+                  id: 123, 
+                  email: 'test@example.com',
+                  name: 'テストユーザー'
+                } 
+              };
+            }
+            if (key === 'ticket.id') {
+              return { 'ticket.id': 999 };
+            }
+            return {};
+          },
+          metadata: async function() {
+            return {
+              settings: {
+                api_endpoint: 'https://example.com/api',
+                api_key: 'test-key'
+              }
+            };
+          },
+          request: async function(options) {
+            console.log('Mock request:', options);
+            // モックチケットデータを返す
+            return {
+              results: [
+                {
+                  id: 1,
+                  subject: '商品が届かない',
+                  description: '注文した商品が1週間経っても届きません',
+                  status: 'solved',
+                  created_at: '2024-02-10T10:00:00Z',
+                  updated_at: '2024-02-11T15:00:00Z',
+                  requester_id: 123
+                },
+                {
+                  id: 2,
+                  subject: '返金について',
+                  description: '返金をお願いしたいです',
+                  status: 'open',
+                  created_at: '2024-02-15T14:30:00Z',
+                  updated_at: '2024-02-15T14:30:00Z',
+                  requester_id: 123
+                },
+                {
+                  id: 3,
+                  subject: '使い方がわからない',
+                  description: '製品の使い方を教えてください',
+                  status: 'solved',
+                  created_at: '2024-01-20T09:00:00Z',
+                  updated_at: '2024-01-21T10:00:00Z',
+                  requester_id: 123
+                }
+              ]
+            };
+          },
+          invoke: function(method, data) {
+            console.log('Mock invoke:', method, data);
+            return Promise.resolve();
+          }
+        };
+      }
+    };
+  </script>
+  <script src="assets/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,936 @@
+/**
+ * Zendesk 顧客リスク分析アプリ
+ * コールセンター電話中の高速理解を実現
+ */
+
+// グローバル変数
+let zafClient;
+let currentTickets = [];
+let selectedTicketId = null; // 単一選択に変更
+let customerRiskData = null;
+let ticketCache = new Map();
+let API_ENDPOINT = '';
+let API_KEY = '';
+
+// クレーム判定キーワード辞書（強化版）
+const COMPLAINT_KEYWORDS = {
+  high: [
+    '返金', '詐欺', '訴える', '弁護士', '消費者センター', 
+    '許せない', '最悪', '二度と', 'ふざけるな', '責任者',
+    '怒り', '対応しない', '解約', '騙された', '信じられない',
+    '謝罪', '賠償', '訴訟', 'クレーム', '激怒'
+  ],
+  medium: [
+    '不満', '困る', '納得できない', '説明不足', '対応悪い', 
+    '時間かかる', '遅い', '不誠実', '不親切', '改善',
+    '問題', 'トラブル', '困った', '心配'
+  ],
+  low: [
+    '確認', '問い合わせ', '教えて', '質問', 'わからない',
+    '知りたい', '聞きたい', '相談'
+  ]
+};
+
+/**
+ * アプリ初期化
+ */
+async function initializeApp() {
+  try {
+    // ZAFClientがグローバルに存在するか確認
+    if (typeof ZAFClient === 'undefined') {
+      throw new Error('ZAFClient is not loaded');
+    }
+    
+    console.log('Initializing ZAF Client...');
+    zafClient = ZAFClient.init();
+    
+    // ZAF初期化完了を待つ
+    console.log('Waiting for ZAF to be ready...');
+    await zafClient.get('currentUser');
+    
+    console.log('ZAF initialized successfully');
+    
+    // アプリ設定を取得
+    try {
+      const settings = await zafClient.metadata();
+      if (settings && settings.settings) {
+        API_ENDPOINT = settings.settings.api_endpoint || '';
+        API_KEY = settings.settings.api_key || '';
+        if (API_ENDPOINT) {
+          console.log('API設定を読み込みました');
+        } else {
+          console.warn('API設定が見つかりません。要約機能は利用できません。');
+        }
+      } else {
+        console.warn('設定情報が取得できませんでした');
+      }
+    } catch (settingsError) {
+      console.warn('設定の取得に失敗しました:', settingsError);
+    }
+    
+    // Zendesk Framework用のリサイズ
+    try {
+      await zafClient.invoke('resize', { width: '100%', height: '600px' });
+      console.log('App resized successfully');
+    } catch (resizeError) {
+      console.warn('Resize failed:', resizeError);
+    }
+    
+    // イベントリスナー登録
+    registerEventListeners();
+    
+    // アプリ起動
+    await startApp();
+    
+  } catch (error) {
+    console.error('ZAF initialization error:', error);
+    showError('アプリの初期化に失敗しました: ' + error.message);
+    hideLoading();
+  }
+}
+
+/**
+ * イベントリスナー登録 - 安全なDOM操作
+ */
+function registerEventListeners() {
+  // 現在のチケットを要約ボタン
+  const currentTicketBtn = document.getElementById('current-ticket-btn');
+  if (currentTicketBtn) {
+    currentTicketBtn.addEventListener('click', handleCurrentTicketSummary);
+  } else {
+    console.warn('current-ticket-btn not found');
+  }
+  
+  // 選択したチケットを要約ボタン
+  const selectedBtn = document.getElementById('summarize-selected-btn');
+  if (selectedBtn) {
+    selectedBtn.addEventListener('click', handleSelectedTicketSummary);
+  } else {
+    console.warn('summarize-selected-btn not found');
+  }
+  
+  // 要約クローズ
+  const closeBtn = document.getElementById('close-summary');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      const container = document.getElementById('summary-container');
+      if (container) container.style.display = 'none';
+    });
+  } else {
+    console.warn('close-summary not found');
+  }
+  
+  // メモ保存
+  const saveBtn = document.getElementById('save-memo-btn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', handleSaveMemo);
+  } else {
+    console.warn('save-memo-btn not found');
+  }
+  
+  // キャッシュクリア
+  window.addEventListener('beforeunload', () => {
+    ticketCache.clear();
+  });
+}
+
+/**
+ * アプリ起動
+ */
+async function startApp() {
+  try {
+    showLoading();
+    
+    // 依頼者情報取得
+    const requesterEmail = await getRequesterEmail();
+    if (!requesterEmail) {
+      showError('依頼者のメールアドレスが見つかりません');
+      return;
+    }
+    
+    // チケット履歴取得
+    const tickets = await fetchTicketHistory(requesterEmail);
+    currentTickets = tickets;
+    
+    // 顧客リスク分析
+    customerRiskData = analyzeCustomerRisk(tickets, requesterEmail);
+    
+    // UI表示
+    renderCustomerRisk(customerRiskData);
+    renderTicketList(tickets);
+    await loadExistingMemos(requesterEmail);
+    
+    hideLoading();
+    showContent();
+    
+  } catch (error) {
+    console.error('アプリ起動エラー:', error);
+    showError('アプリの初期化に失敗しました', error);
+    hideLoading();
+  }
+}
+
+/**
+ * 依頼者メールアドレス取得
+ */
+async function getRequesterEmail() {
+  try {
+    const data = await zafClient.get('ticket.requester');
+    if (data && data['ticket.requester'] && data['ticket.requester'].email) {
+      return data['ticket.requester'].email;
+    }
+    return null;
+  } catch (error) {
+    console.error('メールアドレス取得エラー:', error);
+    return null;
+  }
+}
+
+/**
+ * チケット履歴取得
+ */
+async function fetchTicketHistory(email) {
+  try {
+    // キャッシュチェック
+    if (ticketCache.has(email)) {
+      console.log('キャッシュから取得');
+      return ticketCache.get(email);
+    }
+    
+    // 現在のチケットID取得
+    const currentTicketData = await zafClient.get('ticket.id');
+    const currentTicketId = currentTicketData['ticket.id'];
+    
+    // 検索クエリ
+    const searchQuery = `type:ticket requester:${email}`;
+    
+    // API呼び出し
+    const response = await zafClient.request({
+      url: `/api/v2/search.json?query=${encodeURIComponent(searchQuery)}`,
+      type: 'GET'
+    });
+    
+    let tickets = response.results || [];
+    
+    // 現在のチケットを除外
+    tickets = tickets.filter(t => t.id !== currentTicketId);
+    
+    // 日時降順ソート
+    tickets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    // 各チケットにリスクスコア追加
+    tickets = tickets.map(ticket => ({
+      ...ticket,
+      riskAnalysis: analyzeTicketRisk(ticket)
+    }));
+    
+    // キャッシュ保存
+    ticketCache.set(email, tickets);
+    
+    return tickets;
+    
+  } catch (error) {
+    console.error('チケット履歴取得エラー:', error);
+    throw error;
+  }
+}
+
+/**
+ * チケットリスク分析（強化版）
+ */
+function analyzeTicketRisk(ticket) {
+  const text = `${ticket.subject || ''} ${ticket.description || ''}`.toLowerCase();
+  
+  let complaintScore = 0;
+  let matchedKeywords = [];
+  
+  // 高リスクキーワードマッチング（各30点）
+  COMPLAINT_KEYWORDS.high.forEach(keyword => {
+    if (text.includes(keyword)) {
+      complaintScore += 30;
+      matchedKeywords.push(keyword);
+    }
+  });
+  
+  // 中リスクキーワードマッチング（各15点）
+  COMPLAINT_KEYWORDS.medium.forEach(keyword => {
+    if (text.includes(keyword)) {
+      complaintScore += 15;
+      if (matchedKeywords.length === 0) matchedKeywords.push(keyword);
+    }
+  });
+  
+  // 低リスクキーワードマッチング（各5点）
+  COMPLAINT_KEYWORDS.low.forEach(keyword => {
+    if (text.includes(keyword)) {
+      complaintScore += 5;
+      if (matchedKeywords.length === 0) matchedKeywords.push(keyword);
+    }
+  });
+  
+  // スコア正規化（最大100）
+  complaintScore = Math.min(100, complaintScore);
+  
+  // レベル判定（閾値再設計）
+  let level = 'safe';
+  let levelText = '通常';
+  let icon = '🟢';
+  
+  if (complaintScore >= 50) {
+    level = 'danger';
+    levelText = 'クレーム';
+    icon = '🔥';
+  } else if (complaintScore >= 25) {
+    level = 'warn';
+    levelText = '注意';
+    icon = '⚠';
+  }
+  
+  const reason = matchedKeywords.length > 0 ? matchedKeywords[0] : '通常';
+  
+  return {
+    complaintScore,
+    level,
+    levelText,
+    icon,
+    reason,
+    toxicity: complaintScore,
+    repeatRisk: 0,
+    refundPressure: text.includes('返金') ? 80 : 0
+  };
+}
+
+/**
+ * 顧客リスク分析
+ */
+function analyzeCustomerRisk(tickets, email) {
+  if (!tickets || tickets.length === 0) {
+    return {
+      score: 0,
+      level: 'normal',
+      levelText: '通常',
+      details: '過去の問い合わせ履歴がありません'
+    };
+  }
+  
+  let totalScore = 0;
+  let complaintCount = 0;
+  let recentComplaints = 0;
+  const now = new Date();
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  
+  tickets.forEach(ticket => {
+    const risk = ticket.riskAnalysis;
+    totalScore += risk.complaintScore;
+    
+    if (risk.complaintScore >= 50) {
+      complaintCount++;
+      
+      const ticketDate = new Date(ticket.created_at);
+      if (ticketDate >= ninetyDaysAgo) {
+        recentComplaints++;
+      }
+    }
+  });
+  
+  // 平均スコア
+  const avgScore = Math.round(totalScore / tickets.length);
+  
+  // 最終スコア計算
+  let finalScore = avgScore;
+  if (recentComplaints >= 2) finalScore += 20;
+  if (complaintCount >= 3) finalScore += 15;
+  
+  finalScore = Math.min(100, finalScore);
+  
+  // レベル判定
+  let level = 'normal';
+  let levelText = '通常';
+  if (finalScore >= 60) {
+    level = 'danger';
+    levelText = '要注意';
+  } else if (finalScore >= 30) {
+    level = 'caution';
+    levelText = '慎重対応';
+  }
+  
+  // 詳細テキスト
+  const details = `過去${tickets.length}件 / 直近90日クレーム${recentComplaints}件 / 平均リスク${avgScore}点`;
+  
+  return {
+    score: finalScore,
+    level,
+    levelText,
+    details,
+    complaintCount,
+    recentComplaints
+  };
+}
+
+/**
+ * 顧客リスク表示 - 安全なDOM操作
+ */
+function renderCustomerRisk(riskData) {
+  const levelEl = document.getElementById('risk-level');
+  const barFillEl = document.getElementById('risk-bar-fill');
+  const scoreEl = document.getElementById('risk-score');
+  const detailsEl = document.getElementById('risk-details');
+  
+  if (!levelEl || !barFillEl || !scoreEl || !detailsEl) {
+    console.error('Risk panel elements not found');
+    return;
+  }
+  
+  levelEl.textContent = riskData.levelText;
+  levelEl.className = `risk-level ${riskData.level}`;
+  
+  barFillEl.style.width = `${riskData.score}%`;
+  barFillEl.className = `risk-bar-fill ${riskData.level}`;
+  
+  scoreEl.textContent = riskData.score;
+  detailsEl.textContent = riskData.details;
+}
+
+/**
+ * チケット一覧表示 - 安全なDOM操作
+ */
+function renderTicketList(tickets) {
+  const listEl = document.getElementById('ticket-list');
+  const noTicketsEl = document.getElementById('no-tickets');
+  
+  if (!listEl || !noTicketsEl) {
+    console.error('Ticket list elements not found');
+    return;
+  }
+  
+  console.log('renderTicketList called with', tickets ? tickets.length : 0, 'tickets');
+  
+  if (!tickets || tickets.length === 0) {
+    listEl.style.display = 'none';
+    noTicketsEl.style.display = 'block';
+    console.log('No tickets to display');
+    return;
+  }
+  
+  listEl.innerHTML = '';
+  noTicketsEl.style.display = 'none';
+  
+  tickets.forEach(ticket => {
+    const item = createTicketItem(ticket);
+    listEl.appendChild(item);
+  });
+  
+  console.log('Rendered', tickets.length, 'ticket items');
+}
+
+/**
+ * チケットアイテム作成（洗練版・toggle機能付き）
+ */
+function createTicketItem(ticket) {
+  try {
+    const div = document.createElement('div');
+    div.className = 'ticket-item';
+    div.dataset.ticketId = ticket.id;
+    
+    const risk = ticket.riskAnalysis || { complaintScore: 0, levelText: '通常', icon: '🟢', level: 'safe' };
+    const datetime = formatDateTime(ticket.created_at);
+    const summary = truncateText(ticket.subject || '問い合わせ', 40);
+    const status = translateStatus(ticket.status);
+    
+    div.dataset.risk = risk.level;
+    
+    // 選択チェック（左側）
+    const checkDiv = document.createElement('div');
+    checkDiv.className = 'ticket-select-check';
+    
+    // チケットコンテンツ
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'ticket-content';
+    
+    contentDiv.innerHTML = `
+      <div class="ticket-header">
+        <span class="ticket-datetime">${escapeHtml(datetime)}</span>
+        <span class="ticket-risk-badge ${risk.level}">${risk.icon} ${risk.levelText}</span>
+        <span class="ticket-status ${escapeHtml(ticket.status)}">${escapeHtml(status)}</span>
+      </div>
+      <div class="ticket-summary">「${escapeHtml(summary)}」</div>
+    `;
+    
+    div.appendChild(checkDiv);
+    div.appendChild(contentDiv);
+    
+    // クリックイベント（toggle機能）
+    div.addEventListener('click', () => {
+      const isCurrentlySelected = div.classList.contains('selected');
+      
+      // 他の選択を解除
+      document.querySelectorAll('.ticket-item').forEach(item => {
+        item.classList.remove('selected');
+      });
+      
+      if (isCurrentlySelected) {
+        // 同じカードをクリック → 選択解除
+        selectedTicketId = null;
+        const summarizeBtn = document.getElementById('summarize-selected-btn');
+        if (summarizeBtn) {
+          summarizeBtn.disabled = true;
+        }
+      } else {
+        // 新しいカードを選択
+        div.classList.add('selected');
+        selectedTicketId = ticket.id;
+        const summarizeBtn = document.getElementById('summarize-selected-btn');
+        if (summarizeBtn) {
+          summarizeBtn.disabled = false;
+        }
+      }
+    });
+    
+    return div;
+  } catch (error) {
+    console.error('createTicketItem error:', error);
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'ticket-item error';
+    errorDiv.textContent = 'チケット表示エラー';
+    return errorDiv;
+  }
+}
+
+/**
+ * 日時フォーマット（YYYY/MM/DD HH:MM形式）
+ */
+function formatDateTime(isoDate) {
+  const date = new Date(isoDate);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
+}
+
+/**
+ * テキスト切り詰め
+ */
+function truncateText(text, maxLength) {
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
+}
+
+/**
+ * チケットサマリ生成（ルールベース）
+ */
+function generateTicketSummary(ticket) {
+  const subject = ticket.subject || '';
+  
+  // 30文字に切り詰め
+  if (subject.length <= 30) {
+    return subject;
+  }
+  
+  return subject.substring(0, 30) + '...';
+}
+
+/**
+ * 日付フォーマット
+ */
+function formatDate(isoDate) {
+  const date = new Date(isoDate);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}/${day}`;
+}
+
+/**
+ * ステータス翻訳
+ */
+function translateStatus(status) {
+  const map = {
+    'new': '新規',
+    'open': '対応中',
+    'pending': '保留',
+    'solved': '解決済',
+    'closed': 'クローズ'
+  };
+  return map[status] || status;
+}
+
+/**
+ * 現在のチケットを要約
+ */
+async function handleCurrentTicketSummary() {
+  try {
+    // ボタンを無効化
+    const btn = document.getElementById('current-ticket-btn');
+    if (btn) {
+      btn.disabled = true;
+      const btnText = btn.querySelector('.btn-text');
+      if (btnText) btnText.textContent = '生成中...';
+    }
+    
+    // 現在のチケット情報を取得
+    const ticketData = await zafClient.get(['ticket.id', 'ticket.subject', 'ticket.description', 'ticket.status', 'ticket.createdAt']);
+    
+    const currentTicket = {
+      id: ticketData['ticket.id'],
+      subject: ticketData['ticket.subject'],
+      description: ticketData['ticket.description'],
+      status: ticketData['ticket.status'],
+      created_at: ticketData['ticket.createdAt'],
+      riskAnalysis: analyzeTicketRisk({
+        subject: ticketData['ticket.subject'],
+        description: ticketData['ticket.description']
+      })
+    };
+    
+    // 要約生成
+    const summary = generateModernSummary([currentTicket]);
+    
+    // 表示
+    displayModernSummary(summary);
+    
+    // ボタンを復元
+    if (btn) {
+      btn.disabled = false;
+      const btnText = btn.querySelector('.btn-text');
+      if (btnText) btnText.textContent = 'このチケットを要約';
+    }
+    
+  } catch (error) {
+    console.error('現在チケット要約エラー:', error);
+    showError('要約の生成に失敗しました: ' + error.message);
+    
+    // ボタンを復元
+    const btn = document.getElementById('current-ticket-btn');
+    if (btn) {
+      btn.disabled = false;
+      const btnText = btn.querySelector('.btn-text');
+      if (btnText) btnText.textContent = 'このチケットを要約';
+    }
+  }
+}
+
+/**
+ * 選択したチケットを要約
+ */
+async function handleSelectedTicketSummary() {
+  try {
+    if (!selectedTicketId) {
+      showError('チケットを選択してください');
+      return;
+    }
+    
+    // 選択されたチケットを取得
+    const selectedTicket = currentTickets.find(t => t.id === selectedTicketId);
+    if (!selectedTicket) {
+      showError('選択されたチケットが見つかりません');
+      return;
+    }
+    
+    // ボタンを無効化
+    const btn = document.getElementById('summarize-selected-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.querySelector('.btn-text').textContent = '生成中...';
+    }
+    
+    // 要約生成（ルールベース）
+    const summary = generateModernSummary([selectedTicket]);
+    
+    // 表示
+    displayModernSummary(summary);
+    
+    // ボタンを復元
+    if (btn) {
+      btn.disabled = false;
+      btn.querySelector('.btn-text').textContent = '選択したチケットを要約';
+    }
+    
+  } catch (error) {
+    console.error('要約エラー:', error);
+    showError('要約の生成に失敗しました', error);
+    
+    // ボタンを復元
+    const btn = document.getElementById('summarize-selected-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.querySelector('.btn-text').textContent = '選択したチケットを要約';
+    }
+  }
+}
+
+/**
+ * モダンな要約生成（文章型）
+ */
+function generateModernSummary(tickets) {
+  if (!tickets || tickets.length === 0) {
+    return {
+      brief: 'チケット情報がありません',
+      trend: '',
+      action: ''
+    };
+  }
+  
+  const ticket = tickets[0];
+  const risk = ticket.riskAnalysis;
+  const datetime = formatDateTime(ticket.created_at);
+  
+  // 超要約（1-2行の文章）
+  let brief = `${datetime}に「${ticket.subject || '問い合わせ'}」について連絡あり。`;
+  if (risk.complaintScore >= 50) {
+    brief += '感情的表現が含まれています。';
+  } else if (risk.complaintScore >= 25) {
+    brief += '若干の不満が見られます。';
+  } else {
+    brief += '通常の問い合わせです。';
+  }
+  
+  // 傾向
+  let trend = 'クレーム傾向：';
+  if (risk.complaintScore >= 50) {
+    trend += '高（要注意）';
+  } else if (risk.complaintScore >= 25) {
+    trend += '軽度';
+  } else {
+    trend += 'なし';
+  }
+  
+  // 推奨対応
+  let action = '';
+  if (risk.complaintScore >= 50) {
+    action = '丁寧な傾聴と共感を最優先。必要に応じて上長エスカレーションを検討してください。';
+  } else if (risk.complaintScore >= 25) {
+    action = '通常対応＋丁寧な説明を心がけてください。';
+  } else {
+    action = '通常対応で問題ありません。';
+  }
+  
+  return { brief, trend, action };
+}
+
+/**
+ * 文章型要約表示
+ */
+function displayModernSummary(summary) {
+  const container = document.getElementById('summary-container');
+  const briefText = document.getElementById('summary-brief-text');
+  const trendText = document.getElementById('summary-trend-text');
+  const actionText = document.getElementById('summary-action-text');
+  
+  if (!container || !briefText || !trendText || !actionText) {
+    console.error('Summary container elements not found');
+    return;
+  }
+  
+  briefText.textContent = summary.brief;
+  trendText.textContent = summary.trend;
+  actionText.textContent = summary.action;
+  
+  container.style.display = 'block';
+}
+
+/**
+ * メモ保存 - 安全なDOM操作
+ */
+async function handleSaveMemo() {
+  const input = document.getElementById('memo-input');
+  
+  if (!input) {
+    console.error('memo-input element not found');
+    return;
+  }
+  
+  const text = input.value.trim();
+  
+  if (!text) {
+    showError('メモを入力してください');
+    return;
+  }
+  
+  try {
+    // 依頼者情報取得
+    const requesterData = await zafClient.get('ticket.requester');
+    const requesterId = requesterData['ticket.requester'].id;
+    
+    // メモ保存（ユーザーフィールドに保存）
+    // 注：実際の実装ではカスタムフィールドやタグを使用
+    console.log('メモ保存:', { requesterId, text, date: new Date().toISOString() });
+    
+    // UI更新
+    addMemoToUI(text, new Date());
+    
+    input.value = '';
+    
+    alert('メモを保存しました');
+    
+  } catch (error) {
+    console.error('メモ保存エラー:', error);
+    showError('メモの保存に失敗しました', error);
+  }
+}
+
+/**
+ * 既存メモ読み込み
+ */
+async function loadExistingMemos(requesterEmail) {
+  // 注：実際の実装ではカスタムフィールドやタグから取得
+  // 今はダミー
+  console.log('既存メモ読み込み:', requesterEmail);
+}
+
+/**
+ * メモUI追加 - 安全なDOM操作
+ */
+function addMemoToUI(text, date) {
+  const container = document.getElementById('existing-memos');
+  if (!container) {
+    console.error('existing-memos element not found');
+    return;
+  }
+  
+  const item = document.createElement('div');
+  item.className = 'memo-item';
+  item.innerHTML = `
+    <div class="memo-date">${formatDateTime(date.toISOString())}</div>
+    <div class="memo-text">${escapeHtml(text)}</div>
+  `;
+  container.insertBefore(item, container.firstChild);
+}
+
+
+
+/**
+ * HTMLエスケープ
+ */
+function escapeHtml(text) {
+  if (!text) return '';
+  
+  // より安全な方法
+  var map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  
+  return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+
+/**
+ * UI制御 - 安全なDOM操作
+ */
+function showLoading() {
+  try {
+    const el = document.getElementById('loading');
+    if (el) el.style.display = 'block';
+  } catch (e) {
+    console.error('showLoading error:', e);
+  }
+}
+
+function hideLoading() {
+  try {
+    const el = document.getElementById('loading');
+    if (el) el.style.display = 'none';
+  } catch (e) {
+    console.error('hideLoading error:', e);
+  }
+}
+
+function showContent() {
+  try {
+    const el = document.getElementById('content');
+    if (el) el.style.display = 'flex';
+  } catch (e) {
+    console.error('showContent error:', e);
+  }
+}
+
+function showError(message, error = null) {
+  try {
+    const errorEl = document.getElementById('error');
+    if (!errorEl) {
+      console.error('Error element not found:', message);
+      return;
+    }
+    
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+    
+    if (error) {
+      console.error('エラー詳細:', error);
+    }
+  } catch (e) {
+    console.error('showError failed:', e, 'Original message:', message);
+  }
+}
+
+// 初期化 - より安全な方法
+(function() {
+  'use strict';
+  
+  console.log('Script loaded, document.readyState:', document.readyState);
+  console.log('ZAFClient available:', typeof ZAFClient !== 'undefined');
+  
+  function safeInit() {
+    console.log('safeInit called');
+    
+    // DOMが完全に読み込まれるまで待つ
+    if (document.readyState === 'loading') {
+      console.log('Waiting for DOMContentLoaded...');
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOMContentLoaded fired');
+        initializeApp();
+      });
+    } else {
+      console.log('DOM already ready, initializing immediately');
+      // DOMは既に準備完了 - 少し待ってから初期化
+      setTimeout(initializeApp, 100);
+    }
+  }
+  
+  // ZAF SDKが読み込まれるまで待つ
+  if (typeof ZAFClient !== 'undefined') {
+    console.log('ZAFClient already available');
+    safeInit();
+  } else {
+    console.log('Waiting for ZAFClient to load...');
+    
+    // ZAF SDKの読み込みを待つ（複数の方法を試す）
+    var checkCount = 0;
+    var maxChecks = 50; // 5秒間チェック
+    
+    var checkInterval = setInterval(function() {
+      checkCount++;
+      
+      if (typeof ZAFClient !== 'undefined') {
+        console.log('ZAFClient loaded after', checkCount * 100, 'ms');
+        clearInterval(checkInterval);
+        safeInit();
+      } else if (checkCount >= maxChecks) {
+        console.error('ZAFClient failed to load after', maxChecks * 100, 'ms');
+        clearInterval(checkInterval);
+        
+        // フォールバック: エラー表示
+        setTimeout(function() {
+          var errorEl = document.getElementById('error');
+          if (errorEl) {
+            errorEl.textContent = 'ZAF SDKの読み込みに失敗しました。ページを再読み込みしてください。';
+            errorEl.style.display = 'block';
+          }
+          var loadingEl = document.getElementById('loading');
+          if (loadingEl) {
+            loadingEl.style.display = 'none';
+          }
+        }, 100);
+      }
+    }, 100);
+    
+    // window.loadイベントもリッスン
+    window.addEventListener('load', function() {
+      console.log('window.load fired, ZAFClient available:', typeof ZAFClient !== 'undefined');
+    });
+  }
+})();

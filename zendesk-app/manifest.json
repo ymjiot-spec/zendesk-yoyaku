@@ -1,0 +1,38 @@
+{
+  "name": "Ticket History App",
+  "author": {
+    "name": "Your Company",
+    "email": "support@example.com"
+  },
+  "defaultLocale": "ja",
+  "private": true,
+  "location": {
+    "support": {
+      "ticket_sidebar": {
+        "url": "assets/index.html",
+        "flexible": true
+      }
+    }
+  },
+  "version": "1.0.0",
+  "frameworkVersion": "2.0",
+  "parameters": [
+    {
+      "name": "api_endpoint",
+      "type": "text",
+      "required": false,
+      "secure": false,
+      "default": ""
+    },
+    {
+      "name": "api_key",
+      "type": "text",
+      "required": false,
+      "secure": true,
+      "default": ""
+    }
+  ],
+  "domainWhitelist": [
+    "*.execute-api.*.amazonaws.com"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "app_id": 1,
+  "parameters": {
+    "api_endpoint": "https://example.com",
+    "api_key": "dummy"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "app": {
+    "name": "チケット履歴アプリ",
+    "short_description": "過去の問い合わせ履歴を表示し、AI要約を生成します",
+    "long_description": "このアプリは、現在のチケットの依頼者の過去の問い合わせ履歴を表示し、Amazon Bedrockを使用してAI要約を生成します。",
+    "installation_instructions": "1. API Gatewayエンドポイントを設定してください\n2. API Keyを設定してください\n3. アプリをインストールしてください"
+  },
+  "parameters": {
+    "api_endpoint": {
+      "label": "APIエンドポイント",
+      "helpText": "Lambda関数のAPI GatewayエンドポイントURL"
+    },
+    "api_key": {
+      "label": "APIキー",
+      "helpText": "API Gateway認証用のAPIキー"
+    }
+  }
+}

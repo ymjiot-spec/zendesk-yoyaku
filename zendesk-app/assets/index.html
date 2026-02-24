@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>顧客リスク分析</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app-root">
+    <div id="app">
+      <!-- ローディング -->
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>読み込み中...</p>
+      </div>
+
+      <!-- エラー表示 -->
+      <div id="error" class="error-message" style="display: none;"></div>
+
+      <!-- メインコンテンツ -->
+      <div id="content" style="display: none;">
+      
+      <!-- 上部固定：要約ボタン2つ横並び -->
+      <div class="summary-buttons-section sticky">
+        <button id="current-ticket-btn" class="btn-primary">
+          <span class="btn-icon">✨</span>
+          <span class="btn-text">このチケットを要約</span>
+        </button>
+        <button id="summarize-selected-btn" class="btn-secondary-alt" disabled>
+          <span class="btn-icon">☑️</span>
+          <span class="btn-text">選択を要約</span>
+        </button>
+      </div>
+
+      <!-- 顧客リスク指標 -->
+      <div id="customer-risk" class="risk-panel">
+        <h3 class="section-title">⚠️ 顧客リスク指標</h3>
+        <div class="risk-meter">
+          <div id="risk-level" class="risk-level">通常</div>
+          <div class="risk-bar">
+            <div id="risk-bar-fill" class="risk-bar-fill" style="width: 0%"></div>
+          </div>
+          <div id="risk-score" class="risk-score">0</div>
+        </div>
+        <div id="risk-details" class="risk-details"></div>
+      </div>
+
+      <!-- 要約結果エリア（履歴より上に配置） -->
+      <div id="summary-container" class="summary-container" style="display: none;">
+        <div class="summary-header">
+          <h3 class="section-title">📋 AI要約</h3>
+          <button id="close-summary" class="btn-close">×</button>
+        </div>
+        
+        <!-- LINE風吹き出し表示 -->
+        <div class="summary-line-chat">
+          <!-- お客様吹き出し -->
+          <div class="chat-message customer">
+            <div class="chat-avatar customer-avatar">👤</div>
+            <div class="chat-bubble">
+              <div class="chat-tag">超要約</div>
+              <div id="summary-brief-text" class="chat-text"></div>
+            </div>
+          </div>
+          
+          <!-- OP吹き出し -->
+          <div class="chat-message operator">
+            <div class="chat-bubble">
+              <div class="chat-tag">傾向</div>
+              <div id="summary-trend-text" class="chat-text"></div>
+            </div>
+            <div class="chat-avatar operator-avatar">🎧</div>
+          </div>
+          
+          <!-- OP吹き出し -->
+          <div class="chat-message operator">
+            <div class="chat-bubble">
+              <div class="chat-tag">推奨対応</div>
+              <div id="summary-action-text" class="chat-text"></div>
+            </div>
+            <div class="chat-avatar operator-avatar">🎧</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- チケット履歴一覧 -->
+      <div id="ticket-history" class="ticket-history">
+        <h3 class="section-title">📜 過去の問い合わせ履歴</h3>
+        <div id="ticket-list" class="ticket-list"></div>
+        <div id="no-tickets" class="no-tickets" style="display: none;">
+          過去のチケットはありません
+        </div>
+      </div>
+
+      <!-- 選択したチケットを要約ボタン（削除：上部に移動済み） -->
+
+      <!-- 要約結果エリア（削除：履歴より上に移動済み） -->
+
+      <!-- 要注意メモ -->
+      <div id="alert-memo" class="alert-memo">
+        <h3 class="section-title">⚡ 要注意メモ</h3>
+        <div id="existing-memos" class="existing-memos"></div>
+        <textarea id="memo-input" class="memo-input" placeholder="この顧客に関する注意事項を入力..."></textarea>
+        <button id="save-memo-btn" class="btn-secondary">
+          <span class="btn-icon">💾</span>
+          <span class="btn-text">メモを保存</span>
+        </button>
+      </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://static.zdassets.com/zendesk_app_framework_sdk/2.0/zaf_sdk.min.js"></script>
+  <script src="main.js" defer></script>
+</body>
+</html>

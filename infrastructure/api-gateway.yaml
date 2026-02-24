@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'API Gateway setup for Zendesk Ticket History App'
+
+Parameters:
+  LambdaFunctionArn:
+    Type: String
+    Description: ARN of the Lambda function to integrate with API Gateway
+    Default: ''
+  
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the Lambda function
+    Default: 'zendesk-ticket-history-summarizer'
+  
+  AllowedOrigin:
+    Type: String
+    Description: Allowed origin for CORS (e.g., https://yourcompany.zendesk.com). Use '*' for all origins (not recommended for production)
+    Default: '*'
+
+Resources:
+  # REST API
+  TicketHistoryAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: zendesk-ticket-history-api
+      Description: API for Zendesk Ticket History App to generate AI summaries
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # /summarize リソース
+  SummarizeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TicketHistoryAPI
+      ParentId: !GetAtt TicketHistoryAPI.RootResourceId
+      PathPart: summarize
+
+  # POST メソッド
+  SummarizePostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TicketHistoryAPI
+      ResourceId: !Ref SummarizeResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      RequestParameters:
+        method.request.header.X-Api-Key: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionArn}/invocations'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+          ResponseModels:
+            application/json: Empty
+
+  # OPTIONS メソッド (CORS プリフライト)
+  SummarizeOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TicketHistoryAPI
+      ResourceId: !Ref SummarizeResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      ApiKeyRequired: false
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+          ResponseModels:
+            application/json: Empty
+
+  # Lambda 実行権限
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TicketHistoryAPI}/*/*/*'
+
+  # API デプロイメント
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - SummarizePostMethod
+      - SummarizeOptionsMethod
+    Properties:
+      RestApiId: !Ref TicketHistoryAPI
+      Description: Initial deployment
+
+  # ステージ
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref TicketHistoryAPI
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+      Description: Production stage
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+
+  # API Key
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: zendesk-ticket-history-api-key
+      Description: API Key for Zendesk Ticket History App
+      Enabled: true
+
+  # 使用量プラン
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - ApiStage
+    Properties:
+      UsagePlanName: zendesk-ticket-history-usage-plan
+      Description: Usage plan for Zendesk Ticket History App
+      ApiStages:
+        - ApiId: !Ref TicketHistoryAPI
+          Stage: !Ref ApiStage
+      Quota:
+        Limit: 10000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 50
+
+  # API Key と使用量プランの関連付け
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${TicketHistoryAPI}.execute-api.${AWS::Region}.amazonaws.com/prod/summarize'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  ApiKeyId:
+    Description: API Key ID
+    Value: !Ref ApiKey
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiKeyId'
+
+  ApiId:
+    Description: API Gateway REST API ID
+    Value: !Ref TicketHistoryAPI
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiId'

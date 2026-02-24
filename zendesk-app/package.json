@@ -1,0 +1,23 @@
+{
+  "name": "zendesk-ticket-history-app",
+  "version": "1.0.0",
+  "description": "Zendesk app to display ticket history and generate AI summaries",
+  "private": true,
+  "scripts": {
+    "validate": "zcli apps:validate",
+    "package": "zcli apps:package",
+    "server": "zcli apps:server",
+    "test": "echo \"Tests will be implemented in later tasks\" && exit 0"
+  },
+  "keywords": [
+    "zendesk",
+    "app",
+    "ticket-history",
+    "ai-summary"
+  ],
+  "author": "Your Company",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@zendesk/zcli": "^1.0.0-beta.55"
+  }
+}
