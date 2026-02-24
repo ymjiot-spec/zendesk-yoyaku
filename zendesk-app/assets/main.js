@@ -109,6 +109,14 @@ function registerEventListeners() {
     console.warn('summarize-selected-btn not found');
   }
   
+  // このチケットを表示ボタン
+  const showTicketBtn = document.getElementById('show-current-ticket-btn');
+  if (showTicketBtn) {
+    showTicketBtn.addEventListener('click', handleShowCurrentTicket);
+  } else {
+    console.warn('show-current-ticket-btn not found');
+  }
+  
   // 要約クローズ
   const closeBtn = document.getElementById('close-summary');
   if (closeBtn) {
@@ -132,6 +140,32 @@ function registerEventListeners() {
   window.addEventListener('beforeunload', () => {
     ticketCache.clear();
   });
+}
+
+/**
+ * このチケットを表示
+ */
+async function handleShowCurrentTicket() {
+  try {
+    // 選択されたチケットIDがあればそれを使用、なければ現在のチケット
+    let targetTicketId = selectedTicketId;
+    
+    if (!targetTicketId) {
+      const ticketData = await zafClient.get('ticket.id');
+      targetTicketId = ticketData['ticket.id'];
+    }
+    
+    if (targetTicketId) {
+      // チケット詳細画面に遷移
+      await zafClient.invoke('routeTo', 'ticket', targetTicketId);
+      console.log('チケット表示:', targetTicketId);
+    } else {
+      showError('チケットIDが取得できませんでした');
+    }
+  } catch (error) {
+    console.error('チケット表示エラー:', error);
+    showError('チケットの表示に失敗しました: ' + error.message);
+  }
 }
 
 /**
@@ -436,6 +470,7 @@ function createTicketItem(ticket) {
     const datetime = formatDateTime(ticket.created_at);
     const summary = truncateText(ticket.subject || '問い合わせ', 40);
     const status = translateStatus(ticket.status);
+    const ticketNumber = `#${ticket.id}`;
     
     div.dataset.risk = risk.level;
     
@@ -449,6 +484,7 @@ function createTicketItem(ticket) {
     
     contentDiv.innerHTML = `
       <div class="ticket-header">
+        <a href="#" class="ticket-number-link" data-ticket-id="${ticket.id}">${escapeHtml(ticketNumber)}</a>
         <span class="ticket-datetime">${escapeHtml(datetime)}</span>
         <span class="ticket-risk-badge ${risk.level}">${risk.icon} ${risk.levelText}</span>
         <span class="ticket-status ${escapeHtml(ticket.status)}">${escapeHtml(status)}</span>
@@ -459,6 +495,23 @@ function createTicketItem(ticket) {
     div.appendChild(checkDiv);
     div.appendChild(contentDiv);
     
+    // チケット番号クリックイベント
+    const ticketLink = contentDiv.querySelector('.ticket-number-link');
+    if (ticketLink) {
+      ticketLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const ticketId = e.target.dataset.ticketId;
+        try {
+          await zafClient.invoke('routeTo', 'ticket', ticketId);
+          console.log('チケット表示:', ticketId);
+        } catch (error) {
+          console.error('チケット表示エラー:', error);
+          showError('チケットの表示に失敗しました');
+        }
+      });
+    }
+    
     // クリックイベント（toggle機能）
     div.addEventListener('click', () => {
       const isCurrentlySelected = div.classList.contains('selected');
@@ -467,6 +520,12 @@ function createTicketItem(ticket) {
       document.querySelectorAll('.ticket-item').forEach(item => {
         item.classList.remove('selected');
       });
+      
+      // 要約を非表示
+      const summaryContainer = document.getElementById('summary-container');
+      if (summaryContainer) {
+        summaryContainer.style.display = 'none';
+      }
       
       if (isCurrentlySelected) {
         // 同じカードをクリック → 選択解除
@@ -588,12 +647,27 @@ async function handleCurrentTicketSummary() {
     // 現在のチケット情報を取得
     const ticketData = await zafClient.get(['ticket.id', 'ticket.subject', 'ticket.description', 'ticket.status', 'ticket.createdAt']);
     
+    const ticketId = ticketData['ticket.id'];
+    
+    // チケットのコメント（やり取り）を取得
+    let comments = [];
+    try {
+      const commentsResponse = await zafClient.request({
+        url: `/api/v2/tickets/${ticketId}/comments.json`,
+        type: 'GET'
+      });
+      comments = commentsResponse.comments || [];
+    } catch (error) {
+      console.warn('コメント取得エラー:', error);
+    }
+    
     const currentTicket = {
-      id: ticketData['ticket.id'],
+      id: ticketId,
       subject: ticketData['ticket.subject'],
       description: ticketData['ticket.description'],
       status: ticketData['ticket.status'],
       created_at: ticketData['ticket.createdAt'],
+      comments: comments,
       riskAnalysis: analyzeTicketRisk({
         subject: ticketData['ticket.subject'],
         description: ticketData['ticket.description']
@@ -603,8 +677,8 @@ async function handleCurrentTicketSummary() {
     // 要約生成
     const summary = generateModernSummary([currentTicket]);
     
-    // 表示
-    displayModernSummary(summary);
+    // 表示（チケットID付き）
+    displayModernSummary(summary, ticketId);
     
     // ボタンを復元
     if (btn) {
@@ -654,13 +728,13 @@ async function handleSelectedTicketSummary() {
     // 要約生成（ルールベース）
     const summary = generateModernSummary([selectedTicket]);
     
-    // 表示
-    displayModernSummary(summary);
+    // 表示（チケットID付き）
+    displayModernSummary(summary, selectedTicketId);
     
     // ボタンを復元
     if (btn) {
       btn.disabled = false;
-      btn.querySelector('.btn-text').textContent = '選択したチケットを要約';
+      btn.querySelector('.btn-text').textContent = '選択を要約';
     }
     
   } catch (error) {
@@ -677,7 +751,7 @@ async function handleSelectedTicketSummary() {
 }
 
 /**
- * モダンな要約生成（文章型）
+ * モダンな要約生成（文章型・オペレーター返信含む）
  */
 function generateModernSummary(tickets) {
   if (!tickets || tickets.length === 0) {
@@ -700,6 +774,33 @@ function generateModernSummary(tickets) {
     brief += '若干の不満が見られます。';
   } else {
     brief += '通常の問い合わせです。';
+  }
+  
+  // コメント（やり取り）がある場合は追加
+  if (ticket.comments && ticket.comments.length > 0) {
+    const publicComments = ticket.comments.filter(c => c.public);
+    if (publicComments.length > 0) {
+      brief += `\n\nやり取り回数：${publicComments.length}回`;
+      
+      // オペレーター返信を抽出（author_idがあり、顧客でないもの）
+      const operatorComments = publicComments.filter(c => {
+        // bodyにHTMLタグが含まれる場合はオペレーター返信の可能性が高い
+        // または、via.channelが'api'や'web'でない場合
+        return c.author_id && (!c.via || c.via.channel === 'api' || c.via.source);
+      });
+      
+      if (operatorComments.length > 0) {
+        const latestOp = operatorComments[operatorComments.length - 1];
+        // HTMLタグを除去してテキストのみ抽出
+        let opBody = latestOp.body || latestOp.plain_body || '';
+        opBody = opBody.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+        
+        if (opBody) {
+          const shortBody = opBody.substring(0, 100);
+          brief += `\n\n最新オペレーター対応：\n${shortBody}${opBody.length > 100 ? '...' : ''}`;
+        }
+      }
+    }
   }
   
   // 傾向
@@ -728,7 +829,7 @@ function generateModernSummary(tickets) {
 /**
  * 文章型要約表示
  */
-function displayModernSummary(summary) {
+function displayModernSummary(summary, ticketId) {
   const container = document.getElementById('summary-container');
   const briefText = document.getElementById('summary-brief-text');
   const trendText = document.getElementById('summary-trend-text');
@@ -737,6 +838,12 @@ function displayModernSummary(summary) {
   if (!container || !briefText || !trendText || !actionText) {
     console.error('Summary container elements not found');
     return;
+  }
+  
+  // チケット番号を表示
+  const titleEl = container.querySelector('.section-title');
+  if (titleEl && ticketId) {
+    titleEl.textContent = `📋 AI要約 #${ticketId}`;
   }
   
   briefText.textContent = summary.brief;
