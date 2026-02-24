@@ -104,13 +104,13 @@ body {
   overflow: hidden;
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled):not(.btn-disabled) {
   background: #2563eb;
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(59, 130, 246, 0.4);
 }
 
-.btn-primary:active:not(:disabled) {
+.btn-primary:active:not(:disabled):not(.btn-disabled) {
   transform: translateY(0);
   box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
 }
@@ -119,6 +119,15 @@ body {
   background: #9ca3af;
   color: #e5e7eb;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* プライマリボタン - 無効化状態（選択時） */
+.btn-primary.btn-disabled {
+  background: #e5e7eb;
+  color: #6b7280;
+  cursor: default;
   transform: none;
   box-shadow: none;
 }
@@ -177,6 +186,26 @@ body {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+/* セカンダリボタン - アクティブ状態（選択時に青強調） */
+.btn-secondary-alt.btn-active {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
+}
+
+.btn-secondary-alt.btn-active:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary-alt.btn-active:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
 }
 
 .btn-secondary-alt .btn-icon {

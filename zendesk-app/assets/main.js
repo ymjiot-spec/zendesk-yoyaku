@@ -471,18 +471,12 @@ function createTicketItem(ticket) {
       if (isCurrentlySelected) {
         // 同じカードをクリック → 選択解除
         selectedTicketId = null;
-        const summarizeBtn = document.getElementById('summarize-selected-btn');
-        if (summarizeBtn) {
-          summarizeBtn.disabled = true;
-        }
+        updateButtonStates(false);
       } else {
         // 新しいカードを選択
         div.classList.add('selected');
         selectedTicketId = ticket.id;
-        const summarizeBtn = document.getElementById('summarize-selected-btn');
-        if (summarizeBtn) {
-          summarizeBtn.disabled = false;
-        }
+        updateButtonStates(true);
       }
     });
     
@@ -493,6 +487,28 @@ function createTicketItem(ticket) {
     errorDiv.className = 'ticket-item error';
     errorDiv.textContent = 'チケット表示エラー';
     return errorDiv;
+  }
+}
+
+/**
+ * ボタン状態更新（視覚的優先度切替）
+ */
+function updateButtonStates(isSelected) {
+  const currentTicketBtn = document.getElementById('current-ticket-btn');
+  const selectedTicketBtn = document.getElementById('summarize-selected-btn');
+  
+  if (!currentTicketBtn || !selectedTicketBtn) return;
+  
+  if (isSelected) {
+    // 履歴選択時：選択ボタンを強調、現在チケットボタンをグレーダウン
+    currentTicketBtn.classList.add('btn-disabled');
+    selectedTicketBtn.classList.add('btn-active');
+    selectedTicketBtn.disabled = false;
+  } else {
+    // 未選択時：現在チケットボタンを強調、選択ボタンをセカンダリ
+    currentTicketBtn.classList.remove('btn-disabled');
+    selectedTicketBtn.classList.remove('btn-active');
+    selectedTicketBtn.disabled = true;
   }
 }
 
