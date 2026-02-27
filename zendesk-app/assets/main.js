@@ -385,11 +385,24 @@ function analyzeTicketRisk(ticket) {
  * チケット一覧のsubject+descriptionをGPTに送り、感情・クレーム度を判定
  */
 async function analyzeTicketRiskWithAI(tickets) {
-  // 最大15件に制限（API負荷対策）
-  const targetTickets = tickets.slice(0, 15);
+  if (!tickets || tickets.length === 0) return;
   
-  // 各チケットのコメント（本文）を並列取得（高速化）
-  const commentPromises = targetTickets.map(async (t) => {
+  // 10件ずつバッチ処理（全件対応）
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < tickets.length; i += BATCH_SIZE) {
+    const batch = tickets.slice(i, i + BATCH_SIZE);
+    try {
+      await processTicketBatch(batch);
+    } catch (error) {
+      console.error(`バッチ${i / BATCH_SIZE + 1}エラー:`, error);
+    }
+  }
+  console.log('AIリスク判定全バッチ完了:', tickets.length, '件');
+}
+
+async function processTicketBatch(batchTickets) {
+  // 各チケットのコメントを並列取得
+  const commentPromises = batchTickets.map(async (t) => {
     let commentText = '';
     try {
       const commentsResponse = await zafClient.request({
@@ -397,7 +410,6 @@ async function analyzeTicketRiskWithAI(tickets) {
         type: 'GET'
       });
       const comments = commentsResponse.comments || [];
-      // お客様・オペレーターの本文のみ抽出（テンプレ除去）
       const texts = comments.map(c => stripHTML(c.value || c.body || '').trim()).filter(t => t.length > 10);
       commentText = texts.join(' ').substring(0, 400);
     } catch (e) {
@@ -410,105 +422,84 @@ async function analyzeTicketRiskWithAI(tickets) {
   const ticketData = await Promise.all(commentPromises);
   const ticketSummaries = ticketData.map(d => `ID:${d.id}\n${d.text}`).join('\n---\n');
   
-  console.log('=== AIリスク判定プロンプト ===');
-  console.log('対象チケット数:', targetTickets.length);
-  
-  const prompt = `あなたはコールセンターの品質管理AIです。以下の${targetTickets.length}件のチケットのやり取り内容を読んで分析してください。
+  const prompt = `あなたはコールセンターの品質管理AIです。以下の${batchTickets.length}件のチケットのやり取り内容を読んで分析してください。
 
 ${ticketSummaries}
 
 【重要ルール】
 - summaryは件名やIDではなく、やり取りの内容から「何の問い合わせか」を判断して15文字以内で一言要約すること
-- 人名・ID番号・テンプレ文は無視し、問い合わせの本質を書くこと
-- 例：「通話料金の請求問い合わせ」「プラン変更依頼」「解約手続き」「eSIM設定不具合」
+- 人名・ID番号・テンプレ文は絶対に含めないこと
+- 例：「通話料金の請求問い合わせ」「プラン変更依頼」「解約手続き」「eSIM設定不具合」「名義変更の相談」
 
-必ず全${targetTickets.length}件について以下のJSON配列で回答：
+必ず全${batchTickets.length}件について以下のJSON配列で回答：
 [{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内の一言要約"}]`;
 
-  try {
-    const response = await zafClient.request({
-      url: 'https://api.openai.com/v1/chat/completions',
-      type: 'POST',
-      contentType: 'application/json',
-      headers: {
-        'Authorization': 'Bearer ' + OPENAI_API_KEY
-      },
-      data: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 2000
-      })
-    });
+  const response = await zafClient.request({
+    url: 'https://api.openai.com/v1/chat/completions',
+    type: 'POST',
+    contentType: 'application/json',
+    headers: {
+      'Authorization': 'Bearer ' + OPENAI_API_KEY
+    },
+    data: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 1500
+    })
+  });
 
-    const content = response.choices[0].message.content.trim();
-    console.log('AIリスク判定応答:', content);
+  const content = response.choices[0].message.content.trim();
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return;
+  
+  const results = JSON.parse(jsonMatch[0]);
+  
+  results.forEach(result => {
+    const ticket = currentTickets.find(t => t.id == result.id);
+    if (!ticket) return;
     
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return;
+    const levelMap = {
+      'safe': { levelText: '通常', icon: '🟢' },
+      'warn': { levelText: '注意', icon: '⚠️' },
+      'danger': { levelText: 'クレーム', icon: '🔥' }
+    };
     
-    const results = JSON.parse(jsonMatch[0]);
+    const mapped = levelMap[result.level] || levelMap['safe'];
     
-    // 結果をチケットに反映してUI更新
-    console.log('AIリスク判定結果:', results.length, '件');
-    results.forEach(result => {
-      const ticket = currentTickets.find(t => t.id == result.id);
-      if (!ticket) {
-        console.warn('チケットID不一致:', result.id);
-        return;
+    ticket.riskAnalysis = {
+      complaintScore: result.score || 0,
+      level: result.level || 'safe',
+      levelText: mapped.levelText,
+      icon: mapped.icon,
+      reason: result.reason || '通常',
+      toxicity: result.score || 0,
+      repeatRisk: 0,
+      refundPressure: 0
+    };
+    
+    if (result.summary) {
+      ticket.aiSummary = result.summary;
+    }
+    
+    // DOM更新
+    const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
+    if (ticketEl) {
+      const badge = ticketEl.querySelector('.ticket-risk-badge');
+      if (badge) {
+        badge.className = `ticket-risk-badge ${result.level}`;
+        badge.textContent = `${mapped.icon} ${mapped.levelText}`;
       }
+      ticketEl.dataset.risk = result.level;
       
-      const levelMap = {
-        'safe': { levelText: '通常', icon: '🟢' },
-        'warn': { levelText: '注意', icon: '⚠️' },
-        'danger': { levelText: 'クレーム', icon: '🔥' }
-      };
-      
-      const mapped = levelMap[result.level] || levelMap['safe'];
-      
-      ticket.riskAnalysis = {
-        complaintScore: result.score || 0,
-        level: result.level || 'safe',
-        levelText: mapped.levelText,
-        icon: mapped.icon,
-        reason: result.reason || '通常',
-        toxicity: result.score || 0,
-        repeatRisk: 0,
-        refundPressure: 0
-      };
-      
-      // AI要約をチケットに保存
       if (result.summary) {
-        ticket.aiSummary = result.summary;
-      }
-      
-      // DOM更新
-      const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
-      if (ticketEl) {
-        const badge = ticketEl.querySelector('.ticket-risk-badge');
-        if (badge) {
-          badge.className = `ticket-risk-badge ${result.level}`;
-          badge.textContent = `${mapped.icon} ${mapped.levelText}`;
-        }
-        ticketEl.dataset.risk = result.level;
-        
-        // 件名をAI要約に更新
-        if (result.summary) {
-          const summaryEl = ticketEl.querySelector('.ticket-summary');
-          if (summaryEl) {
-            summaryEl.textContent = `「${result.summary}」`;
-            console.log('要約更新:', ticket.id, '→', result.summary);
-          }
+        const summaryEl = ticketEl.querySelector('.ticket-summary');
+        if (summaryEl) {
+          summaryEl.textContent = `「${result.summary}」`;
         }
       }
-    });
-    
-    console.log('AIリスク判定完了:', results.length, '件');
-    
-  } catch (error) {
-    console.error('AIリスク判定エラー:', error);
-    throw error;
-  }
+    }
+  });
 }
 
 /**
