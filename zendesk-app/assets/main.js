@@ -896,26 +896,6 @@ async function handleCurrentTicketSummary() {
               console.log('Audit由来コメント追加:', text.substring(0, 60));
             }
           }
-          // ChangeイベントでNotificationタイプ（システム通知）
-          if (event.type === 'Change' && event.field_name === 'status' && event.value === 'solved') {
-            // 解決イベントがコメントとして存在しない場合、システムコメントとして追加
-            const hasSystemComment = comments.some(c => {
-              const t = stripHTML(c.value || c.body || '').trim();
-              return t.includes('解決済み') || t.includes('にしました');
-            });
-            if (!hasSystemComment) {
-              comments.push({
-                id: 'system-solved-' + audit.id,
-                author_id: audit.author_id,
-                body: 'チケットが「解決済み」に変更されました',
-                value: 'チケットが「解決済み」に変更されました',
-                public: false,
-                created_at: audit.created_at,
-                via: { channel: 'system' }
-              });
-              console.log('解決イベントをシステムコメントとして追加');
-            }
-          }
         });
       });
       
@@ -1048,24 +1028,6 @@ async function handleSelectedTicketSummary() {
               });
               commentIds.add(event.id);
               console.log('Audit由来コメント追加（選択）:', text.substring(0, 60));
-            }
-          }
-          if (event.type === 'Change' && event.field_name === 'status' && event.value === 'solved') {
-            const hasSystemComment = comments.some(c => {
-              const t = stripHTML(c.value || c.body || '').trim();
-              return t.includes('解決済み') || t.includes('にしました');
-            });
-            if (!hasSystemComment) {
-              comments.push({
-                id: 'system-solved-' + audit.id,
-                author_id: audit.author_id,
-                body: 'チケットが「解決済み」に変更されました',
-                value: 'チケットが「解決済み」に変更されました',
-                public: false,
-                created_at: audit.created_at,
-                via: { channel: 'system' }
-              });
-              console.log('解決イベントをシステムコメントとして追加（選択）');
             }
           }
         });
@@ -1611,10 +1573,13 @@ function displayModernSummary(summary, ticketId) {
         <div class="chat-avatar operator-avatar">🎧</div>
       `;
     } else if (msg.type === 'system') {
+      const isSelfSolved = msg.text.includes('解決策を見つけ') || msg.text.includes('記事に') || msg.text.includes('自己解決');
+      const sysTag = isSelfSolved ? '📌 お客様が自己解決' : '📌 解決経緯';
+      const sysIcon = isSelfSolved ? '✅' : '🔧';
       messageDiv.innerHTML = `
-        <div class="chat-avatar system-avatar">✅</div>
+        <div class="chat-avatar system-avatar">${sysIcon}</div>
         <div class="chat-bubble">
-          <div class="chat-tag">📌 お客様が自己解決</div>
+          <div class="chat-tag">${sysTag}</div>
           <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
       `;
