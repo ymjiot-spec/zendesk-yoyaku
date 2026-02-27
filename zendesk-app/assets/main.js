@@ -217,7 +217,7 @@ async function startApp() {
     const tickets = await fetchTicketHistory(requesterEmail);
     currentTickets = tickets;
     
-    // 顧客リスク分析
+    // 顧客リスク分析（キーワードベース＝初期表示）
     customerRiskData = analyzeCustomerRisk(tickets, requesterEmail);
     
     // UI表示
@@ -227,6 +227,17 @@ async function startApp() {
     
     hideLoading();
     showContent();
+    
+    // GPTによるAIリスク判定（バックグラウンド）
+    if (OPENAI_API_KEY && tickets.length > 0) {
+      analyzeTicketRiskWithAI(tickets).then(() => {
+        // AIリスク判定後に顧客リスクも再計算
+        customerRiskData = analyzeCustomerRisk(currentTickets, requesterEmail);
+        renderCustomerRisk(customerRiskData);
+      }).catch(err => {
+        console.warn('AIリスク判定エラー（キーワードベースを使用）:', err);
+      });
+    }
     
   } catch (error) {
     console.error('アプリ起動エラー:', error);
@@ -363,6 +374,98 @@ function analyzeTicketRisk(ticket) {
     repeatRisk: 0,
     refundPressure: text.includes('返金') ? 80 : 0
   };
+}
+
+/**
+ * GPTによるAIリスク判定（一括）
+ * チケット一覧のsubject+descriptionをGPTに送り、感情・クレーム度を判定
+ */
+async function analyzeTicketRiskWithAI(tickets) {
+  // 最大10件に制限（API負荷対策）
+  const targetTickets = tickets.slice(0, 10);
+  
+  const ticketSummaries = targetTickets.map(t => {
+    const desc = stripHTML(t.description || '').substring(0, 150);
+    return `ID:${t.id} 件名:${t.subject || ''} 内容:${desc}`;
+  }).join('\n');
+  
+  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧について、お客様の感情・クレーム度を判定してください。
+
+${ticketSummaries}
+
+各チケットについて以下を判定：
+- level: "safe"（通常の問い合わせ）, "warn"（不満・苛立ちあり）, "danger"（怒り・クレーム・強い不満）
+- score: 0-100のクレームスコア（0=穏やか, 100=激怒）
+- reason: 判定理由を10文字以内で
+
+JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通常問い合わせ"}]`;
+
+  try {
+    const response = await zafClient.request({
+      url: 'https://api.openai.com/v1/chat/completions',
+      type: 'POST',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'Bearer ' + OPENAI_API_KEY
+      },
+      data: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 600
+      })
+    });
+
+    const content = response.choices[0].message.content.trim();
+    console.log('AIリスク判定応答:', content);
+    
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return;
+    
+    const results = JSON.parse(jsonMatch[0]);
+    
+    // 結果をチケットに反映してUI更新
+    results.forEach(result => {
+      const ticket = currentTickets.find(t => t.id == result.id);
+      if (!ticket) return;
+      
+      const levelMap = {
+        'safe': { levelText: '通常', icon: '🟢' },
+        'warn': { levelText: '注意', icon: '⚠️' },
+        'danger': { levelText: 'クレーム', icon: '🔥' }
+      };
+      
+      const mapped = levelMap[result.level] || levelMap['safe'];
+      
+      ticket.riskAnalysis = {
+        complaintScore: result.score || 0,
+        level: result.level || 'safe',
+        levelText: mapped.levelText,
+        icon: mapped.icon,
+        reason: result.reason || '通常',
+        toxicity: result.score || 0,
+        repeatRisk: 0,
+        refundPressure: 0
+      };
+      
+      // DOM更新
+      const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
+      if (ticketEl) {
+        const badge = ticketEl.querySelector('.ticket-risk-badge');
+        if (badge) {
+          badge.className = `ticket-risk-badge ${result.level}`;
+          badge.textContent = `${mapped.icon} ${mapped.levelText}`;
+        }
+        ticketEl.dataset.risk = result.level;
+      }
+    });
+    
+    console.log('AIリスク判定完了:', results.length, '件');
+    
+  } catch (error) {
+    console.error('AIリスク判定エラー:', error);
+    throw error;
+  }
 }
 
 /**
