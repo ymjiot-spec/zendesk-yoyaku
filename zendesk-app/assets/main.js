@@ -880,6 +880,65 @@ async function handleCurrentTicketSummary() {
       }
     }
     
+    // Audits APIからシステムイベント（自己解決・チケット統合等）を取得して追加
+    try {
+      const auditsResponse = await zafClient.request({
+        url: `/api/v2/tickets/${ticketId}/audits.json`,
+        type: 'GET'
+      });
+      const audits = auditsResponse.audits || [];
+      const commentIds = new Set(comments.map(c => c.id));
+      
+      audits.forEach(audit => {
+        if (!audit.events) return;
+        audit.events.forEach(event => {
+          // Commentタイプのイベントでまだcommentsに含まれていないもの
+          if (event.type === 'Comment' && !commentIds.has(event.id)) {
+            const text = stripHTML(event.html_body || event.body || '').trim();
+            if (text.length >= 5) {
+              comments.push({
+                id: event.id,
+                author_id: event.author_id,
+                body: event.body || '',
+                value: event.html_body || event.body || '',
+                public: event.public,
+                created_at: audit.created_at,
+                via: audit.via || {}
+              });
+              commentIds.add(event.id);
+              console.log('Audit由来コメント追加:', text.substring(0, 60));
+            }
+          }
+          // ChangeイベントでNotificationタイプ（システム通知）
+          if (event.type === 'Change' && event.field_name === 'status' && event.value === 'solved') {
+            // 解決イベントがコメントとして存在しない場合、システムコメントとして追加
+            const hasSystemComment = comments.some(c => {
+              const t = stripHTML(c.value || c.body || '').trim();
+              return t.includes('解決済み') || t.includes('にしました');
+            });
+            if (!hasSystemComment) {
+              comments.push({
+                id: 'system-solved-' + audit.id,
+                author_id: audit.author_id,
+                body: 'チケットが「解決済み」に変更されました',
+                value: 'チケットが「解決済み」に変更されました',
+                public: false,
+                created_at: audit.created_at,
+                via: { channel: 'system' }
+              });
+              console.log('解決イベントをシステムコメントとして追加');
+            }
+          }
+        });
+      });
+      
+      // 時系列順にソート
+      comments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      console.log('Audits統合後コメント数:', comments.length, '件');
+    } catch (auditError) {
+      console.warn('Audits API取得エラー（無視）:', auditError);
+    }
+    
     console.log('現在チケット#' + ticketId + 'の最終コメント数:', comments.length, '件');
     console.log('コメント詳細:', JSON.stringify(comments, null, 2));
     
@@ -974,6 +1033,61 @@ async function handleSelectedTicketSummary() {
       console.log('選択チケットのコメント取得:', comments.length, '件');
     } catch (error) {
       console.warn('コメント取得エラー:', error);
+    }
+    
+    // Audits APIからシステムイベントを取得して追加
+    try {
+      const auditsResponse = await zafClient.request({
+        url: `/api/v2/tickets/${selectedTicketId}/audits.json`,
+        type: 'GET'
+      });
+      const audits = auditsResponse.audits || [];
+      const commentIds = new Set(comments.map(c => c.id));
+      
+      audits.forEach(audit => {
+        if (!audit.events) return;
+        audit.events.forEach(event => {
+          if (event.type === 'Comment' && !commentIds.has(event.id)) {
+            const text = stripHTML(event.html_body || event.body || '').trim();
+            if (text.length >= 5) {
+              comments.push({
+                id: event.id,
+                author_id: event.author_id,
+                body: event.body || '',
+                value: event.html_body || event.body || '',
+                public: event.public,
+                created_at: audit.created_at,
+                via: audit.via || {}
+              });
+              commentIds.add(event.id);
+              console.log('Audit由来コメント追加（選択）:', text.substring(0, 60));
+            }
+          }
+          if (event.type === 'Change' && event.field_name === 'status' && event.value === 'solved') {
+            const hasSystemComment = comments.some(c => {
+              const t = stripHTML(c.value || c.body || '').trim();
+              return t.includes('解決済み') || t.includes('にしました');
+            });
+            if (!hasSystemComment) {
+              comments.push({
+                id: 'system-solved-' + audit.id,
+                author_id: audit.author_id,
+                body: 'チケットが「解決済み」に変更されました',
+                value: 'チケットが「解決済み」に変更されました',
+                public: false,
+                created_at: audit.created_at,
+                via: { channel: 'system' }
+              });
+              console.log('解決イベントをシステムコメントとして追加（選択）');
+            }
+          }
+        });
+      });
+      
+      comments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      console.log('Audits統合後コメント数（選択）:', comments.length, '件');
+    } catch (auditError) {
+      console.warn('Audits API取得エラー（無視）:', auditError);
     }
     
     // チケットにコメントを追加
