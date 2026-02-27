@@ -411,6 +411,11 @@ ${ticketSummaries}
 - 人名・ID番号・テンプレ文は絶対に含めず、問い合わせの本質だけ書くこと
 - 例：「退会後の通話料請求」「プラン変更依頼」「SIM届かない」「名義変更の相談」「決済ページ不具合」
 
+【level判定基準】
+- "safe"：通常の問い合わせ・手続き依頼・質問
+- "warn"：不満・困惑・急ぎの要望・トラブル報告（怒りはないが問題あり）
+- "danger"：明確な怒り・クレーム・返金要求・訴訟示唆・強い不満表現がある場合のみ
+
 必ず全${tickets.length}件をJSON配列で回答：
 [{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内"}]`;
 
@@ -801,10 +806,11 @@ function formatDate(isoDate) {
 function translateStatus(status) {
   const map = {
     'new': '新規',
-    'open': '対応中',
-    'pending': '保留',
-    'solved': '解決済',
-    'closed': 'クローズ'
+    'open': 'オープン',
+    'pending': '保留中',
+    'hold': '待機中',
+    'solved': '解決済み',
+    'closed': '終了'
   };
   return map[status] || status;
 }
