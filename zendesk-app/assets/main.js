@@ -337,30 +337,22 @@ function analyzeTicketRisk(ticket) {
 }
 
 /**
- * GPTによるAIリスク判定（一括）
- * チケット一覧のsubject+descriptionをGPTに送り、感情・クレーム度を判定
+ * GPTによるAIリスク判定（高速版）
+ * 全チケットを1回のGPTリクエストで処理（オーバーヘッド最小化）
  */
 async function analyzeTicketRiskWithAI(tickets) {
   if (!tickets || tickets.length === 0) return;
   
-  // descriptionは既にSearch APIで取得済み → 追加API不要で高速
+  const removeGreetings = /(?:お問い合わせいただきありがとうございます|いつもお世話になっております|お世話になっております|お疲れ様です|よろしくお願い(?:いた)?します|何卒よろしくお願いいたします)[。、\s]*/g;
+  
   const ticketSummaries = tickets.map(t => {
-    const desc = stripHTML(t.description || '').trim();
-    let cleaned = desc.replace(/\n+/g, ' ').trim();
-    ['お問い合わせいただきありがとうございます', 'いつもお世話になっております',
-     'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
-     'よろしくお願いします', '何卒よろしくお願いいたします'].forEach(t => {
-      cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), '');
-    });
-    cleaned = cleaned.replace(/^[。、\s　]+/, '').trim();
-    return `${t.id}:${cleaned.substring(0, 100) || '不明'}`;
+    const desc = stripHTML(t.description || '').replace(/\n+/g, ' ').replace(removeGreetings, '').replace(/^[。、\s　]+/, '').trim();
+    return `${t.id}:${desc.substring(0, 40) || '不明'}`;
   }).join('\n');
   
-  const prompt = `${tickets.length}件のチケットを分析。各チケットのIDと内容：
+  const prompt = `チケット分析。JSON配列で回答。summaryは10文字以内。dangerは明確な怒りのみ。
 ${ticketSummaries}
-
-JSON配列で回答。summaryは15文字以内で問い合わせの本質（人名・ID除外）。levelはsafe/warn/danger（dangerは明確な怒り・クレームのみ）。
-[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内"}]`;
+[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"要約"}]`;
 
   try {
     const response = await zafClient.request({
@@ -373,8 +365,8 @@ JSON配列で回答。summaryは15文字以内で問い合わせの本質（人�
       data: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 1500
+        temperature: 0,
+        max_tokens: 600
       })
     });
 
@@ -1032,38 +1024,25 @@ async function generateAISummary(ticket, validComments, publicComments) {
                      (c.via && c.via.channel === 'system');
     
     if (isSystem) {
-      systemTexts += text.substring(0, 200) + '\n';
+      systemTexts += text.substring(0, 100) + '\n';
     } else if (c.public === false || c.public === 'false') {
-      privateTexts += text.substring(0, 200) + '\n';
+      privateTexts += text.substring(0, 100) + '\n';
     } else if (requesterId && c.author_id == requesterId) {
-      customerTexts += text.substring(0, 300) + '\n';
+      customerTexts += text.substring(0, 150) + '\n';
     } else {
-      operatorTexts += text.substring(0, 300) + '\n';
+      operatorTexts += text.substring(0, 150) + '\n';
     }
   });
 
-  // チケットステータス
   const statusText = ticket.status ? translateStatus(ticket.status) : '';
 
-  const prompt = `あなたはコールセンターのオペレーター支援AIです。以下のチケット情報を要約してください。
-
-件名: ${ticket.subject || ''}
-ステータス: ${statusText}
-
-【お客様の問い合わせ】
-${customerTexts || 'なし'}
-
-【オペレーター返信】
-${operatorTexts || 'なし'}
-
-【社内メモ】
-${privateTexts || 'なし'}
-
-【解決経緯・システム】
-${systemTexts || 'なし'}
-
-以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載：
-{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの対応内容を2行で説明","system":"解決経緯（自己解決・記事参照等があれば記載、なければ空文字）","memo":"社内メモの要点（なければ空文字）"}`;
+  const prompt = `チケット要約。JSON形式で回答。各項目40文字以内、本質のみ。
+件名:${ticket.subject || ''} ステータス:${statusText}
+客:${customerTexts || 'なし'}
+OP:${operatorTexts || 'なし'}
+メモ:${privateTexts || 'なし'}
+経緯:${systemTexts || 'なし'}
+{"customer":"要点","operator":"要点","system":"経緯(なければ空)","memo":"要点(なければ空)"}`;
 
   try {
     const response = await zafClient.request({
@@ -1076,8 +1055,8 @@ ${systemTexts || 'なし'}
       data: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 400
+        temperature: 0.1,
+        max_tokens: 300
       })
     });
 
