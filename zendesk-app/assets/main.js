@@ -969,6 +969,7 @@ async function generateAISummary(ticket, validComments, publicComments) {
   let customerTexts = '';
   let operatorTexts = '';
   let privateTexts = '';
+  let systemTexts = '';
   
   allComments.forEach(c => {
     const text = stripHTML(c.value || c.body || '').trim();
@@ -979,7 +980,15 @@ async function generateAISummary(ticket, validComments, publicComments) {
     } else if (requesterId && c.author_id == requesterId) {
       customerTexts += text.substring(0, 300) + '\n';
     } else {
-      operatorTexts += text.substring(0, 300) + '\n';
+      // システム自動コメント判定（「解決済み」「記事」などのパターン）
+      const isSystem = text.includes('解決済み') || text.includes('にしました') || 
+                       text.includes('次の記事') || text.includes('解決策を見つけ') ||
+                       (c.via && c.via.channel === 'system');
+      if (isSystem) {
+        systemTexts += text.substring(0, 200) + '\n';
+      } else {
+        operatorTexts += text.substring(0, 300) + '\n';
+      }
     }
   });
 
@@ -987,11 +996,16 @@ async function generateAISummary(ticket, validComments, publicComments) {
   console.log('お客様テキスト:', customerTexts.substring(0, 100));
   console.log('OPテキスト:', operatorTexts.substring(0, 100));
   console.log('社内メモテキスト:', privateTexts.substring(0, 100));
+  console.log('システムテキスト:', systemTexts.substring(0, 100));
   console.log('社内メモ空?:', privateTexts.length === 0);
+
+  // チケットステータス
+  const statusText = ticket.status ? translateStatus(ticket.status) : '';
 
   const prompt = `あなたはコールセンターのオペレーター支援AIです。以下のチケット情報を要約してください。
 
 件名: ${ticket.subject || ''}
+ステータス: ${statusText}
 
 【お客様の問い合わせ】
 ${customerTexts || 'なし'}
@@ -1002,8 +1016,11 @@ ${operatorTexts || 'なし'}
 【社内メモ】
 ${privateTexts || 'なし'}
 
-以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載：
-{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの返信内容を2行で説明","memo":"社内メモの要点（なければ空文字）"}`;
+【解決経緯・システム】
+${systemTexts || 'なし'}
+
+以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載。解決経緯があればoperatorに含めてください：
+{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの対応・解決経緯を2行で説明","memo":"社内メモの要点（なければ空文字）"}`;
 
   try {
     const response = await zafClient.request({
