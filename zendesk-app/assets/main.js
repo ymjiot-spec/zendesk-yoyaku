@@ -1136,13 +1136,17 @@ ${systemTexts || 'なし'}
           type = 'operator';
         }
         
-        // 各タイプの最初の出現のみGPT要約テキストを使用
-        if (!seenTypes[type]) {
+        if (type === 'system') {
+          // システムコメントは全件そのまま表示（GPT要約に依存しない）
+          const sysText = parsed.system ? parsed.system.substring(0, 80) : text.substring(0, 80);
+          orderedMessages.push({ type: 'system', text: sysText });
+          seenTypes.system = true;
+        } else if (!seenTypes[type]) {
+          // customer/operator/memoは最初の出現のみGPT要約テキストを使用
           seenTypes[type] = true;
           let msgText = '';
           if (type === 'customer') msgText = (parsed.customer || '問い合わせなし').substring(0, 80);
           else if (type === 'operator') msgText = (parsed.operator || '返信なし').substring(0, 80);
-          else if (type === 'system') msgText = (parsed.system || '').substring(0, 80);
           else if (type === 'memo') msgText = (parsed.memo || '').substring(0, 80);
           
           if (msgText) {
