@@ -1038,20 +1038,20 @@ async function generateAISummary(ticket, validComments, publicComments) {
     const text = stripHTML(c.value || c.body || '').trim();
     if (text.length < 5) return;
     
-    if (c.public === false || c.public === 'false') {
+    // システム自動コメント判定を最優先（author_idに関係なくテキスト内容で判定）
+    const isSystem = text.includes('解決済み') || text.includes('にしました') || 
+                     text.includes('次の記事') || text.includes('解決策を見つけ') ||
+                     text.includes('統合させていただきました') ||
+                     (c.via && c.via.channel === 'system');
+    
+    if (isSystem) {
+      systemTexts += text.substring(0, 200) + '\n';
+    } else if (c.public === false || c.public === 'false') {
       privateTexts += text.substring(0, 200) + '\n';
     } else if (requesterId && c.author_id == requesterId) {
       customerTexts += text.substring(0, 300) + '\n';
     } else {
-      // システム自動コメント判定（「解決済み」「記事」などのパターン）
-      const isSystem = text.includes('解決済み') || text.includes('にしました') || 
-                       text.includes('次の記事') || text.includes('解決策を見つけ') ||
-                       (c.via && c.via.channel === 'system');
-      if (isSystem) {
-        systemTexts += text.substring(0, 200) + '\n';
-      } else {
-        operatorTexts += text.substring(0, 300) + '\n';
-      }
+      operatorTexts += text.substring(0, 300) + '\n';
     }
   });
 
@@ -1118,20 +1118,20 @@ ${systemTexts || 'なし'}
         if (text.length < 5) return;
         
         const isPrivate = c.public === false || c.public === 'false';
-        const isCustomer = requesterId && c.author_id == requesterId;
-        const isSystem = !isPrivate && !isCustomer && (
-          text.includes('解決済み') || text.includes('にしました') || 
+        // システム判定を最優先（author_idに関係なくテキスト内容で判定）
+        const isSystem = text.includes('解決済み') || text.includes('にしました') || 
           text.includes('次の記事') || text.includes('解決策を見つけ') ||
-          (c.via && c.via.channel === 'system')
-        );
+          text.includes('統合させていただきました') ||
+          (c.via && c.via.channel === 'system');
+        const isCustomer = !isSystem && requesterId && c.author_id == requesterId;
         
         let type;
-        if (isPrivate) {
+        if (isPrivate && !isSystem) {
           type = 'memo';
-        } else if (isCustomer) {
-          type = 'customer';
         } else if (isSystem) {
           type = 'system';
+        } else if (isCustomer) {
+          type = 'customer';
         } else {
           type = 'operator';
         }
@@ -1424,25 +1424,25 @@ function generateModernSummary(tickets) {
       if (rawText.length < 5) return;
       
       const isPrivate = c.public === false || c.public === 'false';
-      const isCustomer = requesterId && c.author_id == requesterId;
-      const isSystem = !isPrivate && !isCustomer && (
-        rawText.includes('解決済み') || rawText.includes('にしました') || 
+      // システム判定を最優先（author_idに関係なくテキスト内容で判定）
+      const isSystem = rawText.includes('解決済み') || rawText.includes('にしました') || 
         rawText.includes('次の記事') || rawText.includes('解決策を見つけ') ||
-        (c.via && c.via.channel === 'system')
-      );
+        rawText.includes('統合させていただきました') ||
+        (c.via && c.via.channel === 'system');
+      const isCustomer = !isSystem && requesterId && c.author_id == requesterId;
       
       let type, text;
-      if (isPrivate) {
+      if (isPrivate && !isSystem) {
         type = 'memo';
+        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
+      } else if (isSystem) {
+        type = 'system';
         text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
       } else if (isCustomer) {
         type = 'customer';
         const cleaned = cleanText(rawText);
         if (cleaned.length === 0) return;
         text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
-      } else if (isSystem) {
-        type = 'system';
-        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
       } else {
         type = 'operator';
         const cleaned = cleanText(rawText);
