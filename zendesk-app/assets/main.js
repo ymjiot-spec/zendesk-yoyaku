@@ -230,13 +230,17 @@ async function startApp() {
     
     // GPTによるAIリスク判定（バックグラウンド）
     if (OPENAI_API_KEY && tickets.length > 0) {
+      console.log('=== AIリスク判定開始 ===', 'チケット数:', tickets.length, 'APIキー:', OPENAI_API_KEY ? '設定済み' : '未設定');
       analyzeTicketRiskWithAI(tickets).then(() => {
+        console.log('=== AIリスク判定成功 ===');
         // AIリスク判定後に顧客リスクも再計算
         customerRiskData = analyzeCustomerRisk(currentTickets, requesterEmail);
         renderCustomerRisk(customerRiskData);
       }).catch(err => {
-        console.warn('AIリスク判定エラー（キーワードベースを使用）:', err);
+        console.error('=== AIリスク判定失敗 ===', err);
       });
+    } else {
+      console.warn('AIリスク判定スキップ: OPENAI_API_KEY=', !!OPENAI_API_KEY, 'tickets=', tickets.length);
     }
     
   } catch (error) {
@@ -384,22 +388,42 @@ async function analyzeTicketRiskWithAI(tickets) {
   // 最大10件に制限（API負荷対策）
   const targetTickets = tickets.slice(0, 10);
   
-  const ticketSummaries = targetTickets.map(t => {
-    const desc = stripHTML(t.description || '').substring(0, 400);
-    return `ID:${t.id} 件名:${t.subject || ''} 内容:${desc}`;
-  }).join('\n');
+  // 各チケットのコメント（本文）を取得
+  const ticketTexts = [];
+  for (const t of targetTickets) {
+    let commentText = '';
+    try {
+      const commentsResponse = await zafClient.request({
+        url: `/api/v2/tickets/${t.id}/comments.json`,
+        type: 'GET'
+      });
+      const comments = commentsResponse.comments || [];
+      // 全コメントの本文を結合（最大600文字）
+      commentText = comments.map(c => stripHTML(c.value || c.body || '').trim()).filter(t => t.length > 5).join(' ').substring(0, 600);
+    } catch (e) {
+      console.warn('コメント取得失敗:', t.id, e);
+      commentText = stripHTML(t.description || '').substring(0, 400);
+    }
+    ticketTexts.push(`ID:${t.id}\n${commentText || '(内容なし)'}`);
+  }
   
-  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧について、2つの判定をしてください。
+  const ticketSummaries = ticketTexts.join('\n---\n');
+  
+  console.log('=== AIリスク判定プロンプト ===');
+  console.log('対象チケット数:', targetTickets.length);
+  
+  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧のやり取り内容を読んで分析してください。
 
 ${ticketSummaries}
 
-各チケットについて以下を判定：
-- level: "safe"（通常の問い合わせ）, "warn"（不満・苛立ちあり）, "danger"（怒り・クレーム・強い不満）
-- score: 0-100のクレームスコア（0=穏やか, 100=激怒）
-- reason: 判定理由を10文字以内で
-- summary: 件名ではなく「内容」を読んで、この問い合わせが何かを15文字以内で一言要約（例：「通話料金の返金要求」「SIM届かない」「プラン変更依頼」「解約後の請求について」）。件名が意味不明でも内容から正確に判断すること
+各チケットについて必ず以下の4項目すべてをJSON配列で回答してください：
+1. id: チケットID（数値）
+2. level: "safe"（通常）, "warn"（不満あり）, "danger"（クレーム・怒り）
+3. score: 0-100のクレームスコア
+4. summary: やり取りの内容を読んで「何の問い合わせか」を15文字以内で一言要約（必須）
 
-JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通常問い合わせ","summary":"プラン変更依頼"}]`;
+回答例：
+[{"id":12345,"level":"safe","score":10,"summary":"プラン変更依頼"},{"id":67890,"level":"danger","score":80,"summary":"解約後の請求クレーム"}]`;
 
   try {
     const response = await zafClient.request({
@@ -413,7 +437,7 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 1000
+        max_tokens: 1200
       })
     });
 
@@ -426,9 +450,13 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
     const results = JSON.parse(jsonMatch[0]);
     
     // 結果をチケットに反映してUI更新
+    console.log('AIリスク判定結果:', results.length, '件', JSON.stringify(results));
     results.forEach(result => {
       const ticket = currentTickets.find(t => t.id == result.id);
-      if (!ticket) return;
+      if (!ticket) {
+        console.warn('チケットID不一致:', result.id);
+        return;
+      }
       
       const levelMap = {
         'safe': { levelText: '通常', icon: '🟢' },
@@ -456,6 +484,7 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
       
       // DOM更新
       const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
+      console.log('DOM更新:', ticket.id, 'element:', !!ticketEl, 'summary:', result.summary);
       if (ticketEl) {
         const badge = ticketEl.querySelector('.ticket-risk-badge');
         if (badge) {
