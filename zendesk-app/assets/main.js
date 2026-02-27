@@ -385,11 +385,11 @@ async function analyzeTicketRiskWithAI(tickets) {
   const targetTickets = tickets.slice(0, 10);
   
   const ticketSummaries = targetTickets.map(t => {
-    const desc = stripHTML(t.description || '').substring(0, 150);
+    const desc = stripHTML(t.description || '').substring(0, 400);
     return `ID:${t.id} 件名:${t.subject || ''} 内容:${desc}`;
   }).join('\n');
   
-  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧について、お客様の感情・クレーム度を判定してください。
+  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧について、2つの判定をしてください。
 
 ${ticketSummaries}
 
@@ -397,8 +397,9 @@ ${ticketSummaries}
 - level: "safe"（通常の問い合わせ）, "warn"（不満・苛立ちあり）, "danger"（怒り・クレーム・強い不満）
 - score: 0-100のクレームスコア（0=穏やか, 100=激怒）
 - reason: 判定理由を10文字以内で
+- summary: 件名ではなく「内容」を読んで、この問い合わせが何かを15文字以内で一言要約（例：「通話料金の返金要求」「SIM届かない」「プラン変更依頼」「解約後の請求について」）。件名が意味不明でも内容から正確に判断すること
 
-JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通常問い合わせ"}]`;
+JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通常問い合わせ","summary":"プラン変更依頼"}]`;
 
   try {
     const response = await zafClient.request({
@@ -412,7 +413,7 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 600
+        max_tokens: 1000
       })
     });
 
@@ -448,6 +449,11 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
         refundPressure: 0
       };
       
+      // AI要約をチケットに保存
+      if (result.summary) {
+        ticket.aiSummary = result.summary;
+      }
+      
       // DOM更新
       const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
       if (ticketEl) {
@@ -457,6 +463,14 @@ JSON配列で回答。例：[{"id":12345,"level":"safe","score":10,"reason":"通
           badge.textContent = `${mapped.icon} ${mapped.levelText}`;
         }
         ticketEl.dataset.risk = result.level;
+        
+        // 件名をAI要約に更新
+        if (result.summary) {
+          const summaryEl = ticketEl.querySelector('.ticket-summary');
+          if (summaryEl) {
+            summaryEl.textContent = `「${result.summary}」`;
+          }
+        }
       }
     });
     
