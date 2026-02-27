@@ -12,6 +12,16 @@ let ticketCache = new Map();
 let API_ENDPOINT = '';
 let API_KEY = '';
 
+/**
+ * HTMLタグを除去する関数
+ */
+function stripHTML(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return div.textContent || div.innerText || '';
+}
+
 // クレーム判定キーワード辞書（強化版）
 const COMPLAINT_KEYWORDS = {
   high: [
@@ -134,6 +144,22 @@ function registerEventListeners() {
     saveBtn.addEventListener('click', handleSaveMemo);
   } else {
     console.warn('save-memo-btn not found');
+  }
+  
+  // アプリ全体のホバーでリサイズ
+  const appRoot = document.getElementById('app-root');
+  if (appRoot) {
+    appRoot.addEventListener('mouseenter', () => {
+      if (zafClient) {
+        zafClient.invoke('resize', { width: '100%', height: '800px' });
+      }
+    });
+    
+    appRoot.addEventListener('mouseleave', () => {
+      if (zafClient) {
+        zafClient.invoke('resize', { width: '100%', height: '600px' });
+      }
+    });
   }
   
   // キャッシュクリア
@@ -636,6 +662,13 @@ function translateStatus(status) {
  */
 async function handleCurrentTicketSummary() {
   try {
+    // 選択を解除
+    selectedTicketId = null;
+    document.querySelectorAll('.ticket-item').forEach(item => {
+      item.classList.remove('selected');
+    });
+    updateButtonStates(false);
+    
     // ボタンを無効化
     const btn = document.getElementById('current-ticket-btn');
     if (btn) {
@@ -645,11 +678,20 @@ async function handleCurrentTicketSummary() {
     }
     
     // 現在のチケット情報を取得
-    const ticketData = await zafClient.get(['ticket.id', 'ticket.subject', 'ticket.description', 'ticket.status', 'ticket.createdAt']);
+    const ticketData = await zafClient.get([
+      'ticket.id', 
+      'ticket.subject', 
+      'ticket.description', 
+      'ticket.status', 
+      'ticket.createdAt',
+      'ticket.comments'
+    ]);
     
     const ticketId = ticketData['ticket.id'];
     
-    // チケットのコメント（やり取り）を取得
+    console.log('チケットデータ取得:', ticketData);
+    
+    // チケットのコメント（やり取り）を取得 - 常にAPIから取得（publicフラグが確実に含まれる）
     let comments = [];
     try {
       const commentsResponse = await zafClient.request({
@@ -657,9 +699,16 @@ async function handleCurrentTicketSummary() {
         type: 'GET'
       });
       comments = commentsResponse.comments || [];
+      console.log('APIからコメント取得:', comments.length, '件');
     } catch (error) {
-      console.warn('コメント取得エラー:', error);
+      console.warn('コメントAPI取得エラー、ZAFフォールバック:', error);
+      if (ticketData['ticket.comments']) {
+        comments = ticketData['ticket.comments'];
+      }
     }
+    
+    console.log('現在チケット#' + ticketId + 'の最終コメント数:', comments.length, '件');
+    console.log('コメント詳細:', JSON.stringify(comments, null, 2));
     
     const currentTicket = {
       id: ticketId,
@@ -725,8 +774,27 @@ async function handleSelectedTicketSummary() {
       btn.querySelector('.btn-text').textContent = '生成中...';
     }
     
+    // 選択されたチケットのコメントを取得
+    let comments = [];
+    try {
+      const commentsResponse = await zafClient.request({
+        url: `/api/v2/tickets/${selectedTicketId}/comments.json`,
+        type: 'GET'
+      });
+      comments = commentsResponse.comments || [];
+      console.log('選択チケットのコメント取得:', comments.length, '件');
+    } catch (error) {
+      console.warn('コメント取得エラー:', error);
+    }
+    
+    // チケットにコメントを追加
+    const ticketWithComments = {
+      ...selectedTicket,
+      comments: comments
+    };
+    
     // 要約生成（ルールベース）
-    const summary = generateModernSummary([selectedTicket]);
+    const summary = generateModernSummary([ticketWithComments]);
     
     // 表示（チケットID付き）
     displayModernSummary(summary, selectedTicketId);
@@ -757,61 +825,187 @@ function generateModernSummary(tickets) {
   if (!tickets || tickets.length === 0) {
     return {
       brief: 'チケット情報がありません',
-      trend: '',
-      action: ''
+      trend: 'オペレーター返信がありません',
+      action: '通常対応で問題ありません。',
+      privateMemo: ''
     };
   }
   
   const ticket = tickets[0];
-  const risk = ticket.riskAnalysis;
-  const datetime = formatDateTime(ticket.created_at);
+  const risk = ticket.riskAnalysis || { complaintScore: 0, level: 'safe', levelText: '通常' };
   
-  // 超要約（1-2行の文章）
-  let brief = `${datetime}に「${ticket.subject || '問い合わせ'}」について連絡あり。`;
-  if (risk.complaintScore >= 50) {
-    brief += '感情的表現が含まれています。';
-  } else if (risk.complaintScore >= 25) {
-    brief += '若干の不満が見られます。';
-  } else {
-    brief += '通常の問い合わせです。';
+  console.log('要約生成 - チケット:', ticket.id, 'コメント数:', ticket.comments ? ticket.comments.length : 0);
+  
+  // 超要約（顧客からの最初の問い合わせ）
+  let brief = '';
+  
+  // 顧客の問い合わせ内容
+  // 有効なコメントを抽出（publicフラグ不使用）
+  let customerInquiry = '';
+  let validComments = [];
+  
+  if (ticket.comments && ticket.comments.length > 0) {
+    console.log('=== コメント解析開始 ===');
+    console.log('総コメント:', ticket.comments.length, '件');
+    
+    // 全コメントの詳細をログ出力（author情報含む）
+    ticket.comments.forEach((c, i) => {
+      const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
+      console.log(`RAWコメント[${i}]:`, {
+        author_id: c.author_id,
+        public: c.public,
+        text_preview: text.substring(0, 80),
+        text_length: text.length
+      });
+    });
+    
+    // 有効コメント抽出：HTML除去後に20文字以上
+    validComments = ticket.comments.filter(c => {
+      const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
+      return text.length > 20;
+    });
+    
+    console.log('有効コメント数:', validComments.length, '件');
+    
+    validComments.forEach((c, i) => {
+      const text = stripHTML(c.value || c.body || c.plain_body || '');
+      console.log(`  有効コメント[${i}]:`, text.substring(0, 80));
+    });
+    
+    // 最後の有効コメントを顧客問い合わせとする（コメントは新しい順なので最後が最初の問い合わせ）
+    if (validComments.length > 0) {
+      customerInquiry = stripHTML(validComments[validComments.length - 1].value || validComments[validComments.length - 1].body || validComments[validComments.length - 1].plain_body || '');
+    }
   }
   
-  // コメント（やり取り）がある場合は追加
+  // 顧客問い合わせの処理
+  if (customerInquiry && customerInquiry.trim().length > 0) {
+    let desc = customerInquiry.replace(/\n+/g, ' ').trim();
+    
+    console.log('顧客問い合わせ（処理前）:', desc.substring(0, 100));
+    
+    // 業務テンプレ文章を除去
+    const templates = [
+      'お問い合わせいただきありがとうございます',
+      'いつもお世話になっております',
+      'お世話になっております',
+      'お疲れ様です',
+      'ご担当者様',
+      '株式会社',
+      'よろしくお願いいたします',
+      'よろしくお願いします',
+      '何卒よろしくお願いいたします',
+      '何卒よろしくお願いします',
+      'ありがとうございます',
+      'お手数ですが',
+      'お手数をおかけしますが',
+      '恐れ入りますが',
+      '恐縮ですが',
+      '下記をご確認ください',
+      '下記の通り',
+      '弊社では',
+      '弊社の',
+      '通常対応で問題ありません'
+    ];
+    
+    // テンプレ文を削除
+    templates.forEach(template => {
+      desc = desc.replace(new RegExp(template + '[。、\\s]*', 'g'), '');
+    });
+    
+    // 先頭の句読点や空白を削除
+    desc = desc.replace(/^[。、\s]+/, '').trim();
+    
+    console.log('顧客問い合わせ（処理後）:', desc.substring(0, 100));
+    
+    if (desc.length > 0) {
+      // 30文字以内で本質を抽出
+      brief = desc.substring(0, 30);
+      if (desc.length > 30) {
+        brief += '...';
+      }
+    } else {
+      brief = '問い合わせなし';
+    }
+  } else {
+    brief = '問い合わせなし';
+  }
+  
+  // オペレーター返信内容の要約（publicコメントのみ、社内メモ除外）
+  let trend = '返信なし';
+  let privateMemo = '';
+  
+  console.log('=== オペレーター返信抽出開始 ===');
+  
+  // publicコメントのみ抽出（社内メモを除外）
+  const publicComments = validComments.filter(c => c.public !== false);
+  console.log('公開コメント数:', publicComments.length);
+  
+  // publicコメントが2件以上あれば、最初（最新）がオペレーター返信
+  if (publicComments.length >= 2) {
+    const operatorComment = publicComments[0];
+    let opBody = stripHTML(operatorComment.value || operatorComment.body || operatorComment.plain_body || '');
+    
+    console.log('オペレーター返信（元データ）:', opBody.substring(0, 100));
+    
+    const templates = [
+      'お問い合わせいただきありがとうございます',
+      'いつもお世話になっております',
+      'お世話になっております',
+      '恐れ入りますが',
+      '下記をご確認ください',
+      '何卒よろしくお願いいたします',
+      '何卒よろしくお願いします',
+      'よろしくお願いいたします',
+      'よろしくお願いします',
+      '下記記事をご参照ください'
+    ];
+    
+    templates.forEach(template => {
+      opBody = opBody.replace(new RegExp(template + '[。、\\s]*', 'g'), '');
+    });
+    
+    opBody = opBody.replace(/\n+/g, ' ').trim();
+    opBody = opBody.replace(/^[。、\s]+/, '').trim();
+    
+    console.log('オペレーター返信（処理後）:', opBody.substring(0, 100));
+    
+    if (opBody && opBody.length > 0) {
+      trend = opBody.substring(0, 30);
+      if (opBody.length > 30) {
+        trend += '...';
+      }
+    }
+  } else {
+    console.log('オペレーター返信なし（公開コメント不足）');
+  }
+  
+  // 社内メモ（privateコメント）
   if (ticket.comments && ticket.comments.length > 0) {
-    const publicComments = ticket.comments.filter(c => c.public);
-    if (publicComments.length > 0) {
-      brief += `\n\nやり取り回数：${publicComments.length}回`;
+    const privateComments = ticket.comments.filter(c => {
+      if (c.public === false) {
+        const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
+        return text.length > 20;
+      }
+      return false;
+    });
+    
+    if (privateComments.length > 0) {
+      const latestPrivate = privateComments[privateComments.length - 1];
+      let privateBody = stripHTML(latestPrivate.value || latestPrivate.body || latestPrivate.plain_body || '');
+      privateBody = privateBody.replace(/\n+/g, ' ').trim();
       
-      // オペレーター返信を抽出（author_idがあり、顧客でないもの）
-      const operatorComments = publicComments.filter(c => {
-        // bodyにHTMLタグが含まれる場合はオペレーター返信の可能性が高い
-        // または、via.channelが'api'や'web'でない場合
-        return c.author_id && (!c.via || c.via.channel === 'api' || c.via.source);
-      });
-      
-      if (operatorComments.length > 0) {
-        const latestOp = operatorComments[operatorComments.length - 1];
-        // HTMLタグを除去してテキストのみ抽出
-        let opBody = latestOp.body || latestOp.plain_body || '';
-        opBody = opBody.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
-        
-        if (opBody) {
-          const shortBody = opBody.substring(0, 100);
-          brief += `\n\n最新オペレーター対応：\n${shortBody}${opBody.length > 100 ? '...' : ''}`;
+      if (privateBody) {
+        privateMemo = `${privateBody.substring(0, 30)}`;
+        if (privateBody.length > 30) {
+          privateMemo += '...';
         }
       }
     }
   }
   
-  // 傾向
-  let trend = 'クレーム傾向：';
-  if (risk.complaintScore >= 50) {
-    trend += '高（要注意）';
-  } else if (risk.complaintScore >= 25) {
-    trend += '軽度';
-  } else {
-    trend += 'なし';
-  }
+  console.log('生成されたオペレーター返信:', trend);
+  console.log('生成された社内メモ:', privateMemo);
   
   // 推奨対応
   let action = '';
@@ -823,7 +1017,7 @@ function generateModernSummary(tickets) {
     action = '通常対応で問題ありません。';
   }
   
-  return { brief, trend, action };
+  return { brief, trend, action, privateMemo };
 }
 
 /**
@@ -833,9 +1027,10 @@ function displayModernSummary(summary, ticketId) {
   const container = document.getElementById('summary-container');
   const briefText = document.getElementById('summary-brief-text');
   const trendText = document.getElementById('summary-trend-text');
-  const actionText = document.getElementById('summary-action-text');
+  const privateMemoSection = document.getElementById('private-memo-section');
+  const privateMemoText = document.getElementById('summary-private-memo-text');
   
-  if (!container || !briefText || !trendText || !actionText) {
+  if (!container || !briefText || !trendText) {
     console.error('Summary container elements not found');
     return;
   }
@@ -848,7 +1043,14 @@ function displayModernSummary(summary, ticketId) {
   
   briefText.textContent = summary.brief;
   trendText.textContent = summary.trend;
-  actionText.textContent = summary.action;
+  
+  // 社内メモがあれば表示
+  if (summary.privateMemo && privateMemoSection && privateMemoText) {
+    privateMemoText.textContent = summary.privateMemo;
+    privateMemoSection.style.display = 'flex';
+  } else if (privateMemoSection) {
+    privateMemoSection.style.display = 'none';
+  }
   
   container.style.display = 'block';
 }

@@ -24,7 +24,6 @@
       <!-- 上部固定：要約ボタン2つ横並び -->
       <div class="top-actions">
         <button id="current-ticket-btn" class="btn-primary">
-          <span class="btn-icon">✨</span>
           <span class="btn-text">このチケットを要約</span>
         </button>
         <button id="summarize-selected-btn" class="btn-secondary-alt" disabled>
@@ -61,7 +60,7 @@
             <div class="chat-message customer">
               <div class="chat-avatar customer-avatar">👤</div>
               <div class="chat-bubble">
-                <div class="chat-tag">超要約</div>
+                <div class="chat-tag">お客様</div>
                 <div id="summary-brief-text" class="chat-text"></div>
               </div>
             </div>
@@ -69,19 +68,19 @@
             <!-- OP吹き出し -->
             <div class="chat-message operator">
               <div class="chat-bubble">
-                <div class="chat-tag">傾向</div>
+                <div class="chat-tag">オペレーター返信</div>
                 <div id="summary-trend-text" class="chat-text"></div>
               </div>
               <div class="chat-avatar operator-avatar">🎧</div>
             </div>
             
-            <!-- OP吹き出し -->
-            <div class="chat-message operator">
+            <!-- 社内メモ吹き出し -->
+            <div id="private-memo-section" class="chat-message private-memo" style="display: none;">
               <div class="chat-bubble">
-                <div class="chat-tag">推奨対応</div>
-                <div id="summary-action-text" class="chat-text"></div>
+                <div class="chat-tag">📝 社内メモ</div>
+                <div id="summary-private-memo-text" class="chat-text"></div>
               </div>
-              <div class="chat-avatar operator-avatar">🎧</div>
+              <div class="chat-avatar private-avatar">📋</div>
             </div>
           </div>
 

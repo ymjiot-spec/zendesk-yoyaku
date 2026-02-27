@@ -4,9 +4,9 @@
 }
 
 html, body {
-  height: 100%;
+  height: auto;
   min-height: 100%;
-  overflow: hidden;
+  overflow: visible;
   margin: 0;
   padding: 0;
   width: 100%;
@@ -21,7 +21,8 @@ body {
 }
 
 #app-root {
-  height: 100%;
+  height: auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -66,6 +67,7 @@ body {
   flex: 1;
   min-width: 0;
   height: 40px;
+  font-size: 11px;
 }
 
 /* スクロール可能なLINE履歴エリア */
@@ -565,7 +567,8 @@ body {
   border-bottom: 2px solid #e5e7eb;
   margin: 0;
   padding: 0;
-  max-height: 500px;
+  max-height: none;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -604,7 +607,7 @@ body {
 .summary-line-chat {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   padding: 16px 12px;
   flex: 1;
 }
@@ -617,10 +620,12 @@ body {
 
 .chat-message.customer {
   flex-direction: row;
+  justify-content: flex-start;
 }
 
 .chat-message.operator {
   flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 
 .chat-avatar {
@@ -642,21 +647,35 @@ body {
   background: #e0e7ff;
 }
 
+.private-avatar {
+  background: #fef3c7;
+}
+
 .chat-bubble {
-  max-width: 75%;
-  padding: 10px 12px;
-  border-radius: 16px;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 18px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  word-break: break-word;
 }
 
 .chat-message.customer .chat-bubble {
-  background: #ffffff;
+  background: #f4f7fb;
   border: 1px solid #e5e7eb;
 }
 
 .chat-message.operator .chat-bubble {
-  background: #eef2ff;
+  background: #eef3ff;
   border: 1px solid #c7d2fe;
+}
+
+.chat-message.private-memo {
+  flex-direction: row-reverse;
+}
+
+.chat-message.private-memo .chat-bubble {
+  background: #faf6ea;
+  border: 1px solid #e9dfc0;
 }
 
 .chat-tag {
