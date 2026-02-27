@@ -189,9 +189,14 @@ async function startApp() {
     hideLoading();
     showContent();
     
-    // 起動時に現在のチケットを自動でAI要約
-    if (OPENAI_API_KEY) {
-      handleCurrentTicketSummary();
+    // GPTによるAI要約・リスク判定（バックグラウンド）
+    if (OPENAI_API_KEY && tickets.length > 0) {
+      analyzeTicketRiskWithAI(tickets).then(() => {
+        customerRiskData = analyzeCustomerRisk(currentTickets, requesterEmail);
+        renderCustomerRisk(customerRiskData);
+      }).catch(err => {
+        console.error('AIリスク判定失敗:', err);
+      });
     }
     
   } catch (error) {
