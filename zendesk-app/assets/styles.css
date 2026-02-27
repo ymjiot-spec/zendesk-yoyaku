@@ -694,6 +694,18 @@ body {
   overflow-wrap: anywhere;
 }
 
+.ticket-inline-link {
+  color: #3b82f6;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ticket-inline-link:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
 /* 要約内アクションボタン */
 .summary-actions {
   padding: 12px;

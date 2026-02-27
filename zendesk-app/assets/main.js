@@ -1292,14 +1292,14 @@ function displayModernSummary(summary, ticketId) {
         <div class="chat-avatar customer-avatar">👤</div>
         <div class="chat-bubble">
           <div class="chat-tag">お客様</div>
-          <div class="chat-text">${escapeHtml(msg.text)}</div>
+          <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
       `;
     } else if (msg.type === 'operator') {
       messageDiv.innerHTML = `
         <div class="chat-bubble">
           <div class="chat-tag">オペレーター返信</div>
-          <div class="chat-text">${escapeHtml(msg.text)}</div>
+          <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
         <div class="chat-avatar operator-avatar">🎧</div>
       `;
@@ -1307,16 +1307,37 @@ function displayModernSummary(summary, ticketId) {
       messageDiv.innerHTML = `
         <div class="chat-bubble">
           <div class="chat-tag">📝 社内メモ</div>
-          <div class="chat-text">${escapeHtml(msg.text)}</div>
+          <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
         <div class="chat-avatar private-avatar">📋</div>
       `;
     }
     
     chatContainer.appendChild(messageDiv);
+    
+    // チケットリンクにクリックイベントを設定
+    messageDiv.querySelectorAll('.ticket-inline-link').forEach(link => {
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const tid = e.target.dataset.ticketId;
+        try {
+          await zafClient.invoke('routeTo', 'ticket', tid);
+        } catch (err) {
+          console.error('チケット遷移エラー:', err);
+        }
+      });
+    });
   });
   
   container.style.display = 'block';
+}
+
+/**
+ * テキスト内の #数字 パターンをクリック可能なチケットリンクに変換
+ */
+function linkifyTicketNumbers(text) {
+  return text.replace(/#(\d{4,})/g, '<a href="#" class="ticket-inline-link" data-ticket-id="$1">#$1</a>');
 }
 
 /**
