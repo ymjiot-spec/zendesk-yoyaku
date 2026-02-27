@@ -547,20 +547,22 @@ function analyzeCustomerRisk(tickets, email) {
   // 平均スコア
   const avgScore = Math.round(totalScore / tickets.length);
   
-  // 最終スコア計算
+  // 最終スコア計算（クレームチケットの割合ベース）
   let finalScore = avgScore;
-  if (recentComplaints >= 2) finalScore += 20;
-  if (complaintCount >= 3) finalScore += 15;
+  if (recentComplaints >= 3) finalScore += 20;
+  else if (recentComplaints >= 2) finalScore += 10;
+  if (complaintCount >= 5) finalScore += 15;
+  else if (complaintCount >= 3) finalScore += 10;
   
   finalScore = Math.min(100, finalScore);
   
-  // レベル判定
+  // レベル判定（クレームが実際にあるかどうかで判断）
   let level = 'normal';
   let levelText = '通常';
-  if (finalScore >= 60) {
+  if (complaintCount >= 3 || finalScore >= 70) {
     level = 'danger';
     levelText = '要注意';
-  } else if (finalScore >= 30) {
+  } else if (complaintCount >= 1 || finalScore >= 50) {
     level = 'caution';
     levelText = '慎重対応';
   }
