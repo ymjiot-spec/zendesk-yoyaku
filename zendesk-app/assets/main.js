@@ -1082,8 +1082,8 @@ ${privateTexts || 'なし'}
 【解決経緯・システム】
 ${systemTexts || 'なし'}
 
-以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載。解決経緯があればoperatorに含めてください：
-{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの対応・解決経緯を2行で説明","memo":"社内メモの要点（なければ空文字）"}`;
+以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載：
+{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの対応内容を2行で説明","system":"解決経緯（自己解決・記事参照等があれば記載、なければ空文字）","memo":"社内メモの要点（なければ空文字）"}`;
 
   try {
     const response = await zafClient.request({
@@ -1111,7 +1111,7 @@ ${systemTexts || 'なし'}
       
       // 時系列順メッセージ配列を生成（元コメントの順序に基づく）
       const orderedMessages = [];
-      const seenTypes = { customer: false, operator: false, memo: false };
+      const seenTypes = { customer: false, operator: false, memo: false, system: false };
       
       allComments.forEach(c => {
         const text = stripHTML(c.value || c.body || '').trim();
@@ -1119,12 +1119,19 @@ ${systemTexts || 'なし'}
         
         const isPrivate = c.public === false || c.public === 'false';
         const isCustomer = requesterId && c.author_id == requesterId;
+        const isSystem = !isPrivate && !isCustomer && (
+          text.includes('解決済み') || text.includes('にしました') || 
+          text.includes('次の記事') || text.includes('解決策を見つけ') ||
+          (c.via && c.via.channel === 'system')
+        );
         
         let type;
         if (isPrivate) {
           type = 'memo';
         } else if (isCustomer) {
           type = 'customer';
+        } else if (isSystem) {
+          type = 'system';
         } else {
           type = 'operator';
         }
@@ -1135,6 +1142,7 @@ ${systemTexts || 'なし'}
           let msgText = '';
           if (type === 'customer') msgText = (parsed.customer || '問い合わせなし').substring(0, 80);
           else if (type === 'operator') msgText = (parsed.operator || '返信なし').substring(0, 80);
+          else if (type === 'system') msgText = (parsed.system || '').substring(0, 80);
           else if (type === 'memo') msgText = (parsed.memo || '').substring(0, 80);
           
           if (msgText) {
@@ -1149,6 +1157,9 @@ ${systemTexts || 'なし'}
       }
       if (!seenTypes.operator && parsed.operator) {
         orderedMessages.push({ type: 'operator', text: parsed.operator.substring(0, 80) });
+      }
+      if (!seenTypes.system && parsed.system) {
+        orderedMessages.push({ type: 'system', text: parsed.system.substring(0, 80) });
       }
       if (!seenTypes.memo && parsed.memo) {
         orderedMessages.push({ type: 'memo', text: parsed.memo.substring(0, 80) });
@@ -1414,6 +1425,11 @@ function generateModernSummary(tickets) {
       
       const isPrivate = c.public === false || c.public === 'false';
       const isCustomer = requesterId && c.author_id == requesterId;
+      const isSystem = !isPrivate && !isCustomer && (
+        rawText.includes('解決済み') || rawText.includes('にしました') || 
+        rawText.includes('次の記事') || rawText.includes('解決策を見つけ') ||
+        (c.via && c.via.channel === 'system')
+      );
       
       let type, text;
       if (isPrivate) {
@@ -1424,6 +1440,9 @@ function generateModernSummary(tickets) {
         const cleaned = cleanText(rawText);
         if (cleaned.length === 0) return;
         text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+      } else if (isSystem) {
+        type = 'system';
+        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
       } else {
         type = 'operator';
         const cleaned = cleanText(rawText);
@@ -1468,7 +1487,7 @@ function displayModernSummary(summary, ticketId) {
     if (!msg.text) return;
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = `chat-message ${msg.type === 'customer' ? 'customer' : msg.type === 'memo' ? 'private-memo' : 'operator'}`;
+    messageDiv.className = `chat-message ${msg.type === 'customer' ? 'customer' : msg.type === 'memo' ? 'private-memo' : msg.type === 'system' ? 'system-msg' : 'operator'}`;
     
     if (msg.type === 'customer') {
       messageDiv.innerHTML = `
@@ -1485,6 +1504,14 @@ function displayModernSummary(summary, ticketId) {
           <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
         <div class="chat-avatar operator-avatar">🎧</div>
+      `;
+    } else if (msg.type === 'system') {
+      messageDiv.innerHTML = `
+        <div class="chat-avatar system-avatar">🤖</div>
+        <div class="chat-bubble">
+          <div class="chat-tag">📌 解決経緯</div>
+          <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
+        </div>
       `;
     } else if (msg.type === 'memo') {
       messageDiv.innerHTML = `
