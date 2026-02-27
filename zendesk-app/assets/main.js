@@ -52,14 +52,10 @@ async function initializeApp() {
       throw new Error('ZAFClient is not loaded');
     }
     
-    console.log('Initializing ZAF Client...');
     zafClient = ZAFClient.init();
     
     // ZAF初期化完了を待つ
-    console.log('Waiting for ZAF to be ready...');
     await zafClient.get('currentUser');
-    
-    console.log('ZAF initialized successfully');
     
     // アプリ設定を取得
     try {
@@ -68,27 +64,16 @@ async function initializeApp() {
         API_ENDPOINT = settings.settings.api_endpoint || '';
         API_KEY = settings.settings.api_key || '';
         OPENAI_API_KEY = settings.settings.openai_api_key || '';
-        if (API_ENDPOINT) {
-          console.log('API設定を読み込みました');
-        }
-        if (OPENAI_API_KEY) {
-          console.log('OpenAI API設定を読み込みました');
-        } else {
-          console.warn('OpenAI APIキーが未設定です。ルールベース要約を使用します。');
-        }
-      } else {
-        console.warn('設定情報が取得できませんでした');
       }
     } catch (settingsError) {
-      console.warn('設定の取得に失敗しました:', settingsError);
+      // 設定取得失敗は無視（デフォルト値を使用）
     }
     
     // Zendesk Framework用のリサイズ
     try {
       await zafClient.invoke('resize', { width: '100%', height: '600px' });
-      console.log('App resized successfully');
     } catch (resizeError) {
-      console.warn('Resize failed:', resizeError);
+      // リサイズ失敗は無視
     }
     
     // イベントリスナー登録
@@ -108,48 +93,25 @@ async function initializeApp() {
  * イベントリスナー登録 - 安全なDOM操作
  */
 function registerEventListeners() {
-  // 現在のチケットを要約ボタン
   const currentTicketBtn = document.getElementById('current-ticket-btn');
-  if (currentTicketBtn) {
-    currentTicketBtn.addEventListener('click', handleCurrentTicketSummary);
-  } else {
-    console.warn('current-ticket-btn not found');
-  }
+  if (currentTicketBtn) currentTicketBtn.addEventListener('click', handleCurrentTicketSummary);
   
-  // 選択したチケットを要約ボタン
   const selectedBtn = document.getElementById('summarize-selected-btn');
-  if (selectedBtn) {
-    selectedBtn.addEventListener('click', handleSelectedTicketSummary);
-  } else {
-    console.warn('summarize-selected-btn not found');
-  }
+  if (selectedBtn) selectedBtn.addEventListener('click', handleSelectedTicketSummary);
   
-  // このチケットを表示ボタン
   const showTicketBtn = document.getElementById('show-current-ticket-btn');
-  if (showTicketBtn) {
-    showTicketBtn.addEventListener('click', handleShowCurrentTicket);
-  } else {
-    console.warn('show-current-ticket-btn not found');
-  }
+  if (showTicketBtn) showTicketBtn.addEventListener('click', handleShowCurrentTicket);
   
-  // 要約クローズ
   const closeBtn = document.getElementById('close-summary');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
       const container = document.getElementById('summary-container');
       if (container) container.style.display = 'none';
     });
-  } else {
-    console.warn('close-summary not found');
   }
   
-  // メモ保存
   const saveBtn = document.getElementById('save-memo-btn');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', handleSaveMemo);
-  } else {
-    console.warn('save-memo-btn not found');
-  }
+  if (saveBtn) saveBtn.addEventListener('click', handleSaveMemo);
   
   // アプリ全体のホバーでリサイズ
   const appRoot = document.getElementById('app-root');
@@ -189,7 +151,6 @@ async function handleShowCurrentTicket() {
     if (targetTicketId) {
       // チケット詳細画面に遷移
       await zafClient.invoke('routeTo', 'ticket', targetTicketId);
-      console.log('チケット表示:', targetTicketId);
     } else {
       showError('チケットIDが取得できませんでした');
     }
@@ -230,17 +191,13 @@ async function startApp() {
     
     // GPTによるAIリスク判定（バックグラウンド）
     if (OPENAI_API_KEY && tickets.length > 0) {
-      console.log('=== AIリスク判定開始 ===', 'チケット数:', tickets.length, 'APIキー:', OPENAI_API_KEY ? '設定済み' : '未設定');
       analyzeTicketRiskWithAI(tickets).then(() => {
-        console.log('=== AIリスク判定成功 ===');
         // AIリスク判定後に顧客リスクも再計算
         customerRiskData = analyzeCustomerRisk(currentTickets, requesterEmail);
         renderCustomerRisk(customerRiskData);
       }).catch(err => {
-        console.error('=== AIリスク判定失敗 ===', err);
+        console.error('AIリスク判定失敗:', err);
       });
-    } else {
-      console.warn('AIリスク判定スキップ: OPENAI_API_KEY=', !!OPENAI_API_KEY, 'tickets=', tickets.length);
     }
     
   } catch (error) {
@@ -273,7 +230,6 @@ async function fetchTicketHistory(email) {
   try {
     // キャッシュチェック
     if (ticketCache.has(email)) {
-      console.log('キャッシュから取得');
       return ticketCache.get(email);
     }
     
@@ -388,10 +344,8 @@ async function analyzeTicketRiskWithAI(tickets) {
   if (!tickets || tickets.length === 0) return;
   
   // descriptionは既にSearch APIで取得済み → 追加API不要で高速
-  // 全件を1回のGPT呼び出しで処理（descriptionのみ使用で入力サイズ削減）
   const ticketSummaries = tickets.map(t => {
     const desc = stripHTML(t.description || '').trim();
-    // テンプレ・挨拶を除去して本質だけ抽出
     let cleaned = desc.replace(/\n+/g, ' ').trim();
     ['お問い合わせいただきありがとうございます', 'いつもお世話になっております',
      'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
@@ -399,24 +353,13 @@ async function analyzeTicketRiskWithAI(tickets) {
       cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), '');
     });
     cleaned = cleaned.replace(/^[。、\s　]+/, '').trim();
-    return `ID:${t.id}\n${cleaned.substring(0, 200) || '(内容なし)'}`;
-  }).join('\n---\n');
+    return `${t.id}:${cleaned.substring(0, 100) || '不明'}`;
+  }).join('\n');
   
-  const prompt = `あなたはコールセンターの品質管理AIです。以下の${tickets.length}件のチケットの問い合わせ内容を分析してください。
-
+  const prompt = `${tickets.length}件のチケットを分析。各チケットのIDと内容：
 ${ticketSummaries}
 
-【重要ルール】
-- summaryは「何の問い合わせか」を15文字以内で一言要約（必須）
-- 人名・ID番号・テンプレ文は絶対に含めず、問い合わせの本質だけ書くこと
-- 例：「退会後の通話料請求」「プラン変更依頼」「SIM届かない」「名義変更の相談」「決済ページ不具合」
-
-【level判定基準】
-- "safe"：通常の問い合わせ・手続き依頼・質問
-- "warn"：不満・困惑・急ぎの要望・トラブル報告（怒りはないが問題あり）
-- "danger"：明確な怒り・クレーム・返金要求・訴訟示唆・強い不満表現がある場合のみ
-
-必ず全${tickets.length}件をJSON配列で回答：
+JSON配列で回答。summaryは15文字以内で問い合わせの本質（人名・ID除外）。levelはsafe/warn/danger（dangerは明確な怒り・クレームのみ）。
 [{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内"}]`;
 
   try {
@@ -431,7 +374,7 @@ ${ticketSummaries}
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 3000
+        max_tokens: 1500
       })
     });
 
@@ -486,8 +429,6 @@ ${ticketSummaries}
         }
       }
     });
-    
-    console.log('AI要約完了:', results.length, '件');
     
   } catch (error) {
     console.error('AIリスク判定エラー:', error);
@@ -600,12 +541,9 @@ function renderTicketList(tickets) {
     return;
   }
   
-  console.log('renderTicketList called with', tickets ? tickets.length : 0, 'tickets');
-  
   if (!tickets || tickets.length === 0) {
     listEl.style.display = 'none';
     noTicketsEl.style.display = 'block';
-    console.log('No tickets to display');
     return;
   }
   
@@ -617,7 +555,6 @@ function renderTicketList(tickets) {
     listEl.appendChild(item);
   });
   
-  console.log('Rendered', tickets.length, 'ticket items');
 }
 
 /**
@@ -687,7 +624,6 @@ function createTicketItem(ticket) {
         const ticketId = e.target.dataset.ticketId;
         try {
           await zafClient.invoke('routeTo', 'ticket', ticketId);
-          console.log('チケット表示:', ticketId);
         } catch (error) {
           console.error('チケット表示エラー:', error);
           showError('チケットの表示に失敗しました');
@@ -849,8 +785,6 @@ async function handleCurrentTicketSummary() {
     const ticketId = ticketData['ticket.id'];
     const requesterId = ticketData['ticket.requester.id'];
     
-    console.log('チケットデータ取得:', ticketData);
-    
     // チケットのコメント（やり取り）を取得 - 常にAPIから取得（publicフラグが確実に含まれる）
     let comments = [];
     try {
@@ -859,9 +793,7 @@ async function handleCurrentTicketSummary() {
         type: 'GET'
       });
       comments = commentsResponse.comments || [];
-      console.log('APIからコメント取得:', comments.length, '件');
     } catch (error) {
-      console.warn('コメントAPI取得エラー、ZAFフォールバック:', error);
       if (ticketData['ticket.comments']) {
         comments = ticketData['ticket.comments'];
       }
@@ -893,7 +825,6 @@ async function handleCurrentTicketSummary() {
                 via: audit.via || {}
               });
               commentIds.add(event.id);
-              console.log('Audit由来コメント追加:', text.substring(0, 60));
             }
           }
         });
@@ -901,13 +832,9 @@ async function handleCurrentTicketSummary() {
       
       // 時系列順にソート
       comments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      console.log('Audits統合後コメント数:', comments.length, '件');
     } catch (auditError) {
-      console.warn('Audits API取得エラー（無視）:', auditError);
+      // Audits API失敗は無視
     }
-    
-    console.log('現在チケット#' + ticketId + 'の最終コメント数:', comments.length, '件');
-    console.log('コメント詳細:', JSON.stringify(comments, null, 2));
     
     const currentTicket = {
       id: ticketId,
@@ -997,9 +924,8 @@ async function handleSelectedTicketSummary() {
         type: 'GET'
       });
       comments = commentsResponse.comments || [];
-      console.log('選択チケットのコメント取得:', comments.length, '件');
     } catch (error) {
-      console.warn('コメント取得エラー:', error);
+      // コメント取得失敗は無視
     }
     
     // Audits APIからシステムイベントを取得して追加
@@ -1027,16 +953,14 @@ async function handleSelectedTicketSummary() {
                 via: audit.via || {}
               });
               commentIds.add(event.id);
-              console.log('Audit由来コメント追加（選択）:', text.substring(0, 60));
             }
           }
         });
       });
       
       comments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      console.log('Audits統合後コメント数（選択）:', comments.length, '件');
     } catch (auditError) {
-      console.warn('Audits API取得エラー（無視）:', auditError);
+      // Audits API失敗は無視
     }
     
     // チケットにコメントを追加
@@ -1118,13 +1042,6 @@ async function generateAISummary(ticket, validComments, publicComments) {
     }
   });
 
-  console.log('=== GPT要約入力 ===');
-  console.log('お客様テキスト:', customerTexts.substring(0, 100));
-  console.log('OPテキスト:', operatorTexts.substring(0, 100));
-  console.log('社内メモテキスト:', privateTexts.substring(0, 100));
-  console.log('システムテキスト:', systemTexts.substring(0, 100));
-  console.log('社内メモ空?:', privateTexts.length === 0);
-
   // チケットステータス
   const statusText = ticket.status ? translateStatus(ticket.status) : '';
 
@@ -1165,7 +1082,6 @@ ${systemTexts || 'なし'}
     });
 
     const content = response.choices[0].message.content.trim();
-    console.log('GPT応答:', content);
     
     // JSON部分を抽出
     const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -1264,8 +1180,6 @@ function generateModernSummary(tickets) {
   const risk = ticket.riskAnalysis || { complaintScore: 0, level: 'safe', levelText: '通常' };
   const requesterId = ticket.requester_id;
   
-  console.log('要約生成 - チケット:', ticket.id, 'コメント数:', ticket.comments ? ticket.comments.length : 0, 'requester_id:', requesterId);
-  
   let brief = '';
   let customerInquiry = '';
   let validComments = [];
@@ -1273,21 +1187,6 @@ function generateModernSummary(tickets) {
   let operatorComments = [];
   
   if (ticket.comments && ticket.comments.length > 0) {
-    console.log('=== コメント解析開始 ===');
-    console.log('総コメント:', ticket.comments.length, '件');
-    
-    // 全コメントの詳細をログ出力
-    ticket.comments.forEach((c, i) => {
-      const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
-      const isCustomer = requesterId && c.author_id == requesterId;
-      console.log(`RAWコメント[${i}]:`, {
-        author_id: c.author_id,
-        public: c.public,
-        isCustomer: isCustomer,
-        text_preview: text.substring(0, 80),
-        text_length: text.length
-      });
-    });
     
     // 有効コメント抽出：HTML除去後に20文字以上
     validComments = ticket.comments.filter(c => {
@@ -1295,14 +1194,10 @@ function generateModernSummary(tickets) {
       return text.length > 20;
     });
     
-    console.log('有効コメント数:', validComments.length, '件');
-    
     // requester_idでお客様とオペレーターを分類
     if (requesterId) {
       customerComments = validComments.filter(c => c.author_id == requesterId && c.public !== false);
       operatorComments = validComments.filter(c => c.author_id != requesterId && c.public !== false);
-      console.log('お客様コメント:', customerComments.length, '件');
-      console.log('オペレーターコメント:', operatorComments.length, '件');
     } else {
       // requester_idがない場合はフォールバック（最後=お客様、最初=オペレーター）
       const publicComments = validComments.filter(c => c.public !== false);
@@ -1323,8 +1218,6 @@ function generateModernSummary(tickets) {
   // 顧客問い合わせの処理
   if (customerInquiry && customerInquiry.trim().length > 0) {
     let desc = customerInquiry.replace(/\n+/g, ' ').trim();
-    
-    console.log('顧客問い合わせ（処理前）:', desc.substring(0, 100));
     
     // 業務テンプレ文章を除去
     const templates = [
@@ -1358,8 +1251,6 @@ function generateModernSummary(tickets) {
     // 先頭の句読点や空白を削除
     desc = desc.replace(/^[。、\s]+/, '').trim();
     
-    console.log('顧客問い合わせ（処理後）:', desc.substring(0, 100));
-    
     if (desc.length > 0) {
       // 30文字以内で本質を抽出
       brief = desc.substring(0, 30);
@@ -1377,15 +1268,10 @@ function generateModernSummary(tickets) {
   let trend = '返信なし';
   let privateMemo = '';
   
-  console.log('=== オペレーター返信抽出開始 ===');
-  console.log('オペレーターコメント数:', operatorComments.length);
-  
   if (operatorComments.length > 0) {
     // 最新のオペレーターコメント（配列の先頭が最新）
     const operatorComment = operatorComments[0];
     let opBody = stripHTML(operatorComment.value || operatorComment.body || operatorComment.plain_body || '');
-    
-    console.log('オペレーター返信（元データ）:', opBody.substring(0, 100));
     
     const templates = [
       'お問い合わせいただきありがとうございます',
@@ -1407,16 +1293,12 @@ function generateModernSummary(tickets) {
     opBody = opBody.replace(/\n+/g, ' ').trim();
     opBody = opBody.replace(/^[。、\s]+/, '').trim();
     
-    console.log('オペレーター返信（処理後）:', opBody.substring(0, 100));
-    
     if (opBody && opBody.length > 0) {
       trend = opBody.substring(0, 30);
       if (opBody.length > 30) {
         trend += '...';
       }
     }
-  } else {
-    console.log('オペレーター返信なし');
   }
   
   // publicCommentsはoperatorCommentsを使う
@@ -1439,8 +1321,6 @@ function generateModernSummary(tickets) {
       let privateBody = stripHTML(latestPrivate.value || latestPrivate.body || latestPrivate.plain_body || '');
       privateBody = privateBody.replace(/\n+/g, ' ').trim();
       
-      console.log('社内メモ発見:', privateBody.substring(0, 100));
-      
       if (privateBody) {
         privateMemo = `${privateBody.substring(0, 60)}`;
         if (privateBody.length > 60) {
@@ -1448,16 +1328,11 @@ function generateModernSummary(tickets) {
         }
       }
     } else {
-      console.log('社内メモなし（public===falseのコメントが見つからない）');
       // publicフラグがない場合のフォールバック：author_idがrequester_idでもオペレーターでもないコメントを探す
       ticket.comments.forEach((c, i) => {
-        console.log(`社内メモ探索[${i}]: public=${c.public}, author_id=${c.author_id}`);
       });
     }
   }
-  
-  console.log('生成されたオペレーター返信:', trend);
-  console.log('生成された社内メモ:', privateMemo);
   
   // 推奨対応
   let action = '';
@@ -1656,7 +1531,6 @@ async function handleSaveMemo() {
     
     // メモ保存（ユーザーフィールドに保存）
     // 注：実際の実装ではカスタムフィールドやタグを使用
-    console.log('メモ保存:', { requesterId, text, date: new Date().toISOString() });
     
     // UI更新
     addMemoToUI(text, new Date());
@@ -1677,7 +1551,6 @@ async function handleSaveMemo() {
 async function loadExistingMemos(requesterEmail) {
   // 注：実際の実装ではカスタムフィールドやタグから取得
   // 今はダミー
-  console.log('既存メモ読み込み:', requesterEmail);
 }
 
 /**
@@ -1698,8 +1571,6 @@ function addMemoToUI(text, date) {
   `;
   container.insertBefore(item, container.firstChild);
 }
-
-
 
 /**
  * HTMLエスケープ
@@ -1772,21 +1643,14 @@ function showError(message, error = null) {
 (function() {
   'use strict';
   
-  console.log('Script loaded, document.readyState:', document.readyState);
-  console.log('ZAFClient available:', typeof ZAFClient !== 'undefined');
-  
   function safeInit() {
-    console.log('safeInit called');
     
     // DOMが完全に読み込まれるまで待つ
     if (document.readyState === 'loading') {
-      console.log('Waiting for DOMContentLoaded...');
       document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOMContentLoaded fired');
         initializeApp();
       });
     } else {
-      console.log('DOM already ready, initializing immediately');
       // DOMは既に準備完了 - 少し待ってから初期化
       setTimeout(initializeApp, 100);
     }
@@ -1794,10 +1658,8 @@ function showError(message, error = null) {
   
   // ZAF SDKが読み込まれるまで待つ
   if (typeof ZAFClient !== 'undefined') {
-    console.log('ZAFClient already available');
     safeInit();
   } else {
-    console.log('Waiting for ZAFClient to load...');
     
     // ZAF SDKの読み込みを待つ（複数の方法を試す）
     var checkCount = 0;
@@ -1807,7 +1669,6 @@ function showError(message, error = null) {
       checkCount++;
       
       if (typeof ZAFClient !== 'undefined') {
-        console.log('ZAFClient loaded after', checkCount * 100, 'ms');
         clearInterval(checkInterval);
         safeInit();
       } else if (checkCount >= maxChecks) {
@@ -1828,10 +1689,5 @@ function showError(message, error = null) {
         }, 100);
       }
     }, 100);
-    
-    // window.loadイベントもリッスン
-    window.addEventListener('load', function() {
-      console.log('window.load fired, ZAFClient available:', typeof ZAFClient !== 'undefined');
-    });
   }
 })();
