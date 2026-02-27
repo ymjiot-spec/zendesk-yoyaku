@@ -385,12 +385,11 @@ function analyzeTicketRisk(ticket) {
  * チケット一覧のsubject+descriptionをGPTに送り、感情・クレーム度を判定
  */
 async function analyzeTicketRiskWithAI(tickets) {
-  // 最大10件に制限（API負荷対策）
-  const targetTickets = tickets.slice(0, 10);
+  // 最大15件に制限（API負荷対策）
+  const targetTickets = tickets.slice(0, 15);
   
-  // 各チケットのコメント（本文）を取得
-  const ticketTexts = [];
-  for (const t of targetTickets) {
+  // 各チケットのコメント（本文）を並列取得（高速化）
+  const commentPromises = targetTickets.map(async (t) => {
     let commentText = '';
     try {
       const commentsResponse = await zafClient.request({
@@ -398,32 +397,33 @@ async function analyzeTicketRiskWithAI(tickets) {
         type: 'GET'
       });
       const comments = commentsResponse.comments || [];
-      // 全コメントの本文を結合（最大600文字）
-      commentText = comments.map(c => stripHTML(c.value || c.body || '').trim()).filter(t => t.length > 5).join(' ').substring(0, 600);
+      // お客様・オペレーターの本文のみ抽出（テンプレ除去）
+      const texts = comments.map(c => stripHTML(c.value || c.body || '').trim()).filter(t => t.length > 10);
+      commentText = texts.join(' ').substring(0, 400);
     } catch (e) {
       console.warn('コメント取得失敗:', t.id, e);
-      commentText = stripHTML(t.description || '').substring(0, 400);
+      commentText = stripHTML(t.description || '').substring(0, 300);
     }
-    ticketTexts.push(`ID:${t.id}\n${commentText || '(内容なし)'}`);
-  }
+    return { id: t.id, text: commentText || '(内容なし)' };
+  });
   
-  const ticketSummaries = ticketTexts.join('\n---\n');
+  const ticketData = await Promise.all(commentPromises);
+  const ticketSummaries = ticketData.map(d => `ID:${d.id}\n${d.text}`).join('\n---\n');
   
   console.log('=== AIリスク判定プロンプト ===');
   console.log('対象チケット数:', targetTickets.length);
   
-  const prompt = `あなたはコールセンターの品質管理AIです。以下のチケット一覧のやり取り内容を読んで分析してください。
+  const prompt = `あなたはコールセンターの品質管理AIです。以下の${targetTickets.length}件のチケットのやり取り内容を読んで分析してください。
 
 ${ticketSummaries}
 
-各チケットについて必ず以下の4項目すべてをJSON配列で回答してください：
-1. id: チケットID（数値）
-2. level: "safe"（通常）, "warn"（不満あり）, "danger"（クレーム・怒り）
-3. score: 0-100のクレームスコア
-4. summary: やり取りの内容を読んで「何の問い合わせか」を15文字以内で一言要約（必須）
+【重要ルール】
+- summaryは件名やIDではなく、やり取りの内容から「何の問い合わせか」を判断して15文字以内で一言要約すること
+- 人名・ID番号・テンプレ文は無視し、問い合わせの本質を書くこと
+- 例：「通話料金の請求問い合わせ」「プラン変更依頼」「解約手続き」「eSIM設定不具合」
 
-回答例：
-[{"id":12345,"level":"safe","score":10,"summary":"プラン変更依頼"},{"id":67890,"level":"danger","score":80,"summary":"解約後の請求クレーム"}]`;
+必ず全${targetTickets.length}件について以下のJSON配列で回答：
+[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内の一言要約"}]`;
 
   try {
     const response = await zafClient.request({
@@ -437,7 +437,7 @@ ${ticketSummaries}
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 1200
+        max_tokens: 2000
       })
     });
 
@@ -450,7 +450,7 @@ ${ticketSummaries}
     const results = JSON.parse(jsonMatch[0]);
     
     // 結果をチケットに反映してUI更新
-    console.log('AIリスク判定結果:', results.length, '件', JSON.stringify(results));
+    console.log('AIリスク判定結果:', results.length, '件');
     results.forEach(result => {
       const ticket = currentTickets.find(t => t.id == result.id);
       if (!ticket) {
@@ -484,7 +484,6 @@ ${ticketSummaries}
       
       // DOM更新
       const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
-      console.log('DOM更新:', ticket.id, 'element:', !!ticketEl, 'summary:', result.summary);
       if (ticketEl) {
         const badge = ticketEl.querySelector('.ticket-risk-badge');
         if (badge) {
@@ -498,6 +497,7 @@ ${ticketSummaries}
           const summaryEl = ticketEl.querySelector('.ticket-summary');
           if (summaryEl) {
             summaryEl.textContent = `「${result.summary}」`;
+            console.log('要約更新:', ticket.id, '→', result.summary);
           }
         }
       }
