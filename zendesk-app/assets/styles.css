@@ -299,21 +299,27 @@ body {
 /* 顧客リスク指標 */
 .risk-panel {
   background: #ffffff;
-  padding: 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid #f3f4f6;
+}
+
+.risk-panel .section-title {
+  font-size: 11px;
+  margin: 0 0 2px 0;
+  padding: 0;
 }
 
 .risk-meter {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 40px;
+  gap: 8px;
+  height: 24px;
 }
 
 .risk-level {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  min-width: 70px;
+  min-width: 50px;
 }
 
 .risk-level.normal {
@@ -330,16 +336,16 @@ body {
 
 .risk-bar {
   flex: 1;
-  height: 6px;
+  height: 4px;
   background: #f3f4f6;
-  border-radius: 3px;
+  border-radius: 2px;
   overflow: hidden;
 }
 
 .risk-bar-fill {
   height: 100%;
   transition: width 0.3s ease, background 0.3s ease;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .risk-bar-fill.normal {
@@ -355,18 +361,18 @@ body {
 }
 
 .risk-score {
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 600;
-  min-width: 30px;
+  min-width: 24px;
   text-align: right;
   color: #1f2937;
 }
 
 .risk-details {
-  font-size: 11px;
+  font-size: 10px;
   color: #6b7280;
-  line-height: 1.5;
-  margin-top: 6px;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
 /* チケット履歴 */

@@ -1625,9 +1625,9 @@ function displayModernSummary(summary, ticketId) {
       `;
     } else if (msg.type === 'system') {
       messageDiv.innerHTML = `
-        <div class="chat-avatar system-avatar">🤖</div>
+        <div class="chat-avatar system-avatar">✅</div>
         <div class="chat-bubble">
-          <div class="chat-tag">📌 解決経緯</div>
+          <div class="chat-tag">📌 お客様が自己解決</div>
           <div class="chat-text">${linkifyTicketNumbers(escapeHtml(msg.text))}</div>
         </div>
       `;
