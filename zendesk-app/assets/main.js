@@ -11,6 +11,7 @@ let customerRiskData = null;
 let ticketCache = new Map();
 let API_ENDPOINT = '';
 let API_KEY = '';
+let OPENAI_API_KEY = '';
 
 /**
  * HTMLタグを除去する関数
@@ -66,10 +67,14 @@ async function initializeApp() {
       if (settings && settings.settings) {
         API_ENDPOINT = settings.settings.api_endpoint || '';
         API_KEY = settings.settings.api_key || '';
+        OPENAI_API_KEY = settings.settings.openai_api_key || '';
         if (API_ENDPOINT) {
           console.log('API設定を読み込みました');
+        }
+        if (OPENAI_API_KEY) {
+          console.log('OpenAI API設定を読み込みました');
         } else {
-          console.warn('API設定が見つかりません。要約機能は利用できません。');
+          console.warn('OpenAI APIキーが未設定です。ルールベース要約を使用します。');
         }
       } else {
         console.warn('設定情報が取得できませんでした');
@@ -684,10 +689,12 @@ async function handleCurrentTicketSummary() {
       'ticket.description', 
       'ticket.status', 
       'ticket.createdAt',
-      'ticket.comments'
+      'ticket.comments',
+      'ticket.requester.id'
     ]);
     
     const ticketId = ticketData['ticket.id'];
+    const requesterId = ticketData['ticket.requester.id'];
     
     console.log('チケットデータ取得:', ticketData);
     
@@ -717,14 +724,30 @@ async function handleCurrentTicketSummary() {
       status: ticketData['ticket.status'],
       created_at: ticketData['ticket.createdAt'],
       comments: comments,
+      requester_id: requesterId,
       riskAnalysis: analyzeTicketRisk({
         subject: ticketData['ticket.subject'],
         description: ticketData['ticket.description']
       })
     };
     
-    // 要約生成
-    const summary = generateModernSummary([currentTicket]);
+    // 要約生成（GPT優先、フォールバックでルールベース）
+    let summary;
+    if (OPENAI_API_KEY) {
+      const ruleBase = generateModernSummary([currentTicket]);
+      const aiResult = await generateAISummary(currentTicket, ruleBase._validComments || [], ruleBase._publicComments || []);
+      if (aiResult) {
+        // AI要約で社内メモが空ならルールベースの社内メモを使う
+        if (!aiResult.privateMemo && ruleBase.privateMemo) {
+          aiResult.privateMemo = ruleBase.privateMemo;
+        }
+        summary = aiResult;
+      } else {
+        summary = ruleBase;
+      }
+    } else {
+      summary = generateModernSummary([currentTicket]);
+    }
     
     // 表示（チケットID付き）
     displayModernSummary(summary, ticketId);
@@ -793,8 +816,22 @@ async function handleSelectedTicketSummary() {
       comments: comments
     };
     
-    // 要約生成（ルールベース）
-    const summary = generateModernSummary([ticketWithComments]);
+    // 要約生成（GPT優先、フォールバックでルールベース）
+    let summary;
+    if (OPENAI_API_KEY) {
+      const ruleBase = generateModernSummary([ticketWithComments]);
+      const aiResult = await generateAISummary(ticketWithComments, ruleBase._validComments || [], ruleBase._publicComments || []);
+      if (aiResult) {
+        if (!aiResult.privateMemo && ruleBase.privateMemo) {
+          aiResult.privateMemo = ruleBase.privateMemo;
+        }
+        summary = aiResult;
+      } else {
+        summary = ruleBase;
+      }
+    } else {
+      summary = generateModernSummary([ticketWithComments]);
+    }
     
     // 表示（チケットID付き）
     displayModernSummary(summary, selectedTicketId);
@@ -819,6 +856,137 @@ async function handleSelectedTicketSummary() {
 }
 
 /**
+ * OpenAI GPTによるAI要約
+ */
+async function generateAISummary(ticket, validComments, publicComments) {
+  const requesterId = ticket.requester_id;
+  const allComments = ticket.comments || [];
+  
+  // requester_idでお客様とオペレーターを分類
+  let customerTexts = '';
+  let operatorTexts = '';
+  let privateTexts = '';
+  
+  allComments.forEach(c => {
+    const text = stripHTML(c.value || c.body || '').trim();
+    if (text.length < 5) return;
+    
+    if (c.public === false || c.public === 'false') {
+      privateTexts += text.substring(0, 200) + '\n';
+    } else if (requesterId && c.author_id == requesterId) {
+      customerTexts += text.substring(0, 300) + '\n';
+    } else {
+      operatorTexts += text.substring(0, 300) + '\n';
+    }
+  });
+
+  console.log('=== GPT要約入力 ===');
+  console.log('お客様テキスト:', customerTexts.substring(0, 100));
+  console.log('OPテキスト:', operatorTexts.substring(0, 100));
+  console.log('社内メモテキスト:', privateTexts.substring(0, 100));
+  console.log('社内メモ空?:', privateTexts.length === 0);
+
+  const prompt = `あなたはコールセンターのオペレーター支援AIです。以下のチケット情報を要約してください。
+
+件名: ${ticket.subject || ''}
+
+【お客様の問い合わせ】
+${customerTexts || 'なし'}
+
+【オペレーター返信】
+${operatorTexts || 'なし'}
+
+【社内メモ】
+${privateTexts || 'なし'}
+
+以下のJSON形式で回答してください。各項目は60文字程度（2行分）で要点を説明。敬語・挨拶・テンプレ文は除外し、本質のみ記載：
+{"customer":"お客様の問い合わせ内容を2行で説明","operator":"オペレーターの返信内容を2行で説明","memo":"社内メモの要点（なければ空文字）"}`;
+
+  try {
+    const response = await zafClient.request({
+      url: 'https://api.openai.com/v1/chat/completions',
+      type: 'POST',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'Bearer ' + OPENAI_API_KEY
+      },
+      data: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 400
+      })
+    });
+
+    const content = response.choices[0].message.content.trim();
+    console.log('GPT応答:', content);
+    
+    // JSON部分を抽出
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      // 時系列順メッセージ配列を生成（元コメントの順序に基づく）
+      const orderedMessages = [];
+      const seenTypes = { customer: false, operator: false, memo: false };
+      
+      allComments.forEach(c => {
+        const text = stripHTML(c.value || c.body || '').trim();
+        if (text.length < 5) return;
+        
+        const isPrivate = c.public === false || c.public === 'false';
+        const isCustomer = requesterId && c.author_id == requesterId;
+        
+        let type;
+        if (isPrivate) {
+          type = 'memo';
+        } else if (isCustomer) {
+          type = 'customer';
+        } else {
+          type = 'operator';
+        }
+        
+        // 各タイプの最初の出現のみGPT要約テキストを使用
+        if (!seenTypes[type]) {
+          seenTypes[type] = true;
+          let msgText = '';
+          if (type === 'customer') msgText = (parsed.customer || '問い合わせなし').substring(0, 80);
+          else if (type === 'operator') msgText = (parsed.operator || '返信なし').substring(0, 80);
+          else if (type === 'memo') msgText = (parsed.memo || '').substring(0, 80);
+          
+          if (msgText) {
+            orderedMessages.push({ type, text: msgText });
+          }
+        }
+      });
+      
+      // コメントに含まれなかったタイプも追加（GPTが生成した場合）
+      if (!seenTypes.customer && parsed.customer) {
+        orderedMessages.unshift({ type: 'customer', text: parsed.customer.substring(0, 80) });
+      }
+      if (!seenTypes.operator && parsed.operator) {
+        orderedMessages.push({ type: 'operator', text: parsed.operator.substring(0, 80) });
+      }
+      if (!seenTypes.memo && parsed.memo) {
+        orderedMessages.push({ type: 'memo', text: parsed.memo.substring(0, 80) });
+      }
+      
+      return {
+        brief: (parsed.customer || '問い合わせなし').substring(0, 80),
+        trend: (parsed.operator || '返信なし').substring(0, 80),
+        privateMemo: (parsed.memo || '').substring(0, 80),
+        action: '',
+        orderedMessages
+      };
+    }
+  } catch (error) {
+    console.error('GPT要約エラー:', error);
+  }
+  
+  return null; // 失敗時はnullを返す → ルールベースにフォールバック
+}
+
+/**
  * モダンな要約生成（文章型・オペレーター返信含む）
  */
 function generateModernSummary(tickets) {
@@ -833,27 +1001,28 @@ function generateModernSummary(tickets) {
   
   const ticket = tickets[0];
   const risk = ticket.riskAnalysis || { complaintScore: 0, level: 'safe', levelText: '通常' };
+  const requesterId = ticket.requester_id;
   
-  console.log('要約生成 - チケット:', ticket.id, 'コメント数:', ticket.comments ? ticket.comments.length : 0);
+  console.log('要約生成 - チケット:', ticket.id, 'コメント数:', ticket.comments ? ticket.comments.length : 0, 'requester_id:', requesterId);
   
-  // 超要約（顧客からの最初の問い合わせ）
   let brief = '';
-  
-  // 顧客の問い合わせ内容
-  // 有効なコメントを抽出（publicフラグ不使用）
   let customerInquiry = '';
   let validComments = [];
+  let customerComments = [];
+  let operatorComments = [];
   
   if (ticket.comments && ticket.comments.length > 0) {
     console.log('=== コメント解析開始 ===');
     console.log('総コメント:', ticket.comments.length, '件');
     
-    // 全コメントの詳細をログ出力（author情報含む）
+    // 全コメントの詳細をログ出力
     ticket.comments.forEach((c, i) => {
       const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
+      const isCustomer = requesterId && c.author_id == requesterId;
       console.log(`RAWコメント[${i}]:`, {
         author_id: c.author_id,
         public: c.public,
+        isCustomer: isCustomer,
         text_preview: text.substring(0, 80),
         text_length: text.length
       });
@@ -867,14 +1036,26 @@ function generateModernSummary(tickets) {
     
     console.log('有効コメント数:', validComments.length, '件');
     
-    validComments.forEach((c, i) => {
-      const text = stripHTML(c.value || c.body || c.plain_body || '');
-      console.log(`  有効コメント[${i}]:`, text.substring(0, 80));
-    });
+    // requester_idでお客様とオペレーターを分類
+    if (requesterId) {
+      customerComments = validComments.filter(c => c.author_id == requesterId && c.public !== false);
+      operatorComments = validComments.filter(c => c.author_id != requesterId && c.public !== false);
+      console.log('お客様コメント:', customerComments.length, '件');
+      console.log('オペレーターコメント:', operatorComments.length, '件');
+    } else {
+      // requester_idがない場合はフォールバック（最後=お客様、最初=オペレーター）
+      const publicComments = validComments.filter(c => c.public !== false);
+      if (publicComments.length >= 2) {
+        customerComments = [publicComments[publicComments.length - 1]];
+        operatorComments = [publicComments[0]];
+      } else if (publicComments.length === 1) {
+        customerComments = publicComments;
+      }
+    }
     
-    // 最後の有効コメントを顧客問い合わせとする（コメントは新しい順なので最後が最初の問い合わせ）
-    if (validComments.length > 0) {
-      customerInquiry = stripHTML(validComments[validComments.length - 1].value || validComments[validComments.length - 1].body || validComments[validComments.length - 1].plain_body || '');
+    // お客様の問い合わせ内容
+    if (customerComments.length > 0) {
+      customerInquiry = stripHTML(customerComments[0].value || customerComments[0].body || customerComments[0].plain_body || '');
     }
   }
   
@@ -931,19 +1112,16 @@ function generateModernSummary(tickets) {
     brief = '問い合わせなし';
   }
   
-  // オペレーター返信内容の要約（publicコメントのみ、社内メモ除外）
+  // オペレーター返信内容の要約（author_idベースで分類済み）
   let trend = '返信なし';
   let privateMemo = '';
   
   console.log('=== オペレーター返信抽出開始 ===');
+  console.log('オペレーターコメント数:', operatorComments.length);
   
-  // publicコメントのみ抽出（社内メモを除外）
-  const publicComments = validComments.filter(c => c.public !== false);
-  console.log('公開コメント数:', publicComments.length);
-  
-  // publicコメントが2件以上あれば、最初（最新）がオペレーター返信
-  if (publicComments.length >= 2) {
-    const operatorComment = publicComments[0];
+  if (operatorComments.length > 0) {
+    // 最新のオペレーターコメント（配列の先頭が最新）
+    const operatorComment = operatorComments[0];
     let opBody = stripHTML(operatorComment.value || operatorComment.body || operatorComment.plain_body || '');
     
     console.log('オペレーター返信（元データ）:', opBody.substring(0, 100));
@@ -977,15 +1155,20 @@ function generateModernSummary(tickets) {
       }
     }
   } else {
-    console.log('オペレーター返信なし（公開コメント不足）');
+    console.log('オペレーター返信なし');
   }
+  
+  // publicCommentsはoperatorCommentsを使う
+  const publicComments = operatorComments;
   
   // 社内メモ（privateコメント）
   if (ticket.comments && ticket.comments.length > 0) {
     const privateComments = ticket.comments.filter(c => {
-      if (c.public === false) {
+      // public === false または public が falsy（undefined以外）
+      const isPrivate = c.public === false || c.public === 'false';
+      if (isPrivate) {
         const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
-        return text.length > 20;
+        return text.length > 5;
       }
       return false;
     });
@@ -995,12 +1178,20 @@ function generateModernSummary(tickets) {
       let privateBody = stripHTML(latestPrivate.value || latestPrivate.body || latestPrivate.plain_body || '');
       privateBody = privateBody.replace(/\n+/g, ' ').trim();
       
+      console.log('社内メモ発見:', privateBody.substring(0, 100));
+      
       if (privateBody) {
-        privateMemo = `${privateBody.substring(0, 30)}`;
-        if (privateBody.length > 30) {
+        privateMemo = `${privateBody.substring(0, 60)}`;
+        if (privateBody.length > 60) {
           privateMemo += '...';
         }
       }
+    } else {
+      console.log('社内メモなし（public===falseのコメントが見つからない）');
+      // publicフラグがない場合のフォールバック：author_idがrequester_idでもオペレーターでもないコメントを探す
+      ticket.comments.forEach((c, i) => {
+        console.log(`社内メモ探索[${i}]: public=${c.public}, author_id=${c.author_id}`);
+      });
     }
   }
   
@@ -1017,20 +1208,61 @@ function generateModernSummary(tickets) {
     action = '通常対応で問題ありません。';
   }
   
-  return { brief, trend, action, privateMemo };
+  // 時系列順メッセージ配列を生成
+  const orderedMessages = [];
+  if (ticket.comments && ticket.comments.length > 0) {
+    // テンプレ除去関数
+    const cleanText = (text) => {
+      const templates = [
+        'お問い合わせいただきありがとうございます', 'いつもお世話になっております',
+        'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
+        'よろしくお願いします', '何卒よろしくお願いいたします', '何卒よろしくお願いします',
+        'ありがとうございます', 'お手数ですが', '恐れ入りますが', '下記をご確認ください'
+      ];
+      let cleaned = text.replace(/\n+/g, ' ').trim();
+      templates.forEach(t => { cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), ''); });
+      cleaned = cleaned.replace(/^[。、\s]+/, '').trim();
+      return cleaned;
+    };
+    
+    ticket.comments.forEach(c => {
+      const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
+      if (rawText.length < 5) return;
+      
+      const isPrivate = c.public === false || c.public === 'false';
+      const isCustomer = requesterId && c.author_id == requesterId;
+      
+      let type, text;
+      if (isPrivate) {
+        type = 'memo';
+        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
+      } else if (isCustomer) {
+        type = 'customer';
+        const cleaned = cleanText(rawText);
+        if (cleaned.length === 0) return;
+        text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+      } else {
+        type = 'operator';
+        const cleaned = cleanText(rawText);
+        if (cleaned.length === 0) return;
+        text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+      }
+      
+      orderedMessages.push({ type, text });
+    });
+  }
+  
+  return { brief, trend, action, privateMemo, orderedMessages, _validComments: validComments, _publicComments: publicComments };
 }
 
 /**
- * 文章型要約表示
+ * 文章型要約表示（時系列順・動的DOM生成）
  */
 function displayModernSummary(summary, ticketId) {
   const container = document.getElementById('summary-container');
-  const briefText = document.getElementById('summary-brief-text');
-  const trendText = document.getElementById('summary-trend-text');
-  const privateMemoSection = document.getElementById('private-memo-section');
-  const privateMemoText = document.getElementById('summary-private-memo-text');
+  const chatContainer = document.getElementById('summary-chat-container');
   
-  if (!container || !briefText || !trendText) {
+  if (!container || !chatContainer) {
     console.error('Summary container elements not found');
     return;
   }
@@ -1041,18 +1273,61 @@ function displayModernSummary(summary, ticketId) {
     titleEl.textContent = `📋 AI要約 #${ticketId}`;
   }
   
-  briefText.textContent = summary.brief;
-  trendText.textContent = summary.trend;
+  // チャットコンテナをクリア
+  chatContainer.innerHTML = '';
   
-  // 社内メモがあれば表示
-  if (summary.privateMemo && privateMemoSection && privateMemoText) {
-    privateMemoText.textContent = summary.privateMemo;
-    privateMemoSection.style.display = 'flex';
-  } else if (privateMemoSection) {
-    privateMemoSection.style.display = 'none';
-  }
+  // orderedMessagesがあれば時系列順で表示
+  const messages = summary.orderedMessages && summary.orderedMessages.length > 0
+    ? summary.orderedMessages
+    : buildFallbackMessages(summary);
+  
+  messages.forEach(msg => {
+    if (!msg.text) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${msg.type === 'customer' ? 'customer' : msg.type === 'memo' ? 'private-memo' : 'operator'}`;
+    
+    if (msg.type === 'customer') {
+      messageDiv.innerHTML = `
+        <div class="chat-avatar customer-avatar">👤</div>
+        <div class="chat-bubble">
+          <div class="chat-tag">お客様</div>
+          <div class="chat-text">${escapeHtml(msg.text)}</div>
+        </div>
+      `;
+    } else if (msg.type === 'operator') {
+      messageDiv.innerHTML = `
+        <div class="chat-bubble">
+          <div class="chat-tag">オペレーター返信</div>
+          <div class="chat-text">${escapeHtml(msg.text)}</div>
+        </div>
+        <div class="chat-avatar operator-avatar">🎧</div>
+      `;
+    } else if (msg.type === 'memo') {
+      messageDiv.innerHTML = `
+        <div class="chat-bubble">
+          <div class="chat-tag">📝 社内メモ</div>
+          <div class="chat-text">${escapeHtml(msg.text)}</div>
+        </div>
+        <div class="chat-avatar private-avatar">📋</div>
+      `;
+    }
+    
+    chatContainer.appendChild(messageDiv);
+  });
   
   container.style.display = 'block';
+}
+
+/**
+ * orderedMessagesがない場合のフォールバック（旧形式互換）
+ */
+function buildFallbackMessages(summary) {
+  const messages = [];
+  if (summary.brief) messages.push({ type: 'customer', text: summary.brief });
+  if (summary.privateMemo) messages.push({ type: 'memo', text: summary.privateMemo });
+  if (summary.trend) messages.push({ type: 'operator', text: summary.trend });
+  return messages;
 }
 
 /**

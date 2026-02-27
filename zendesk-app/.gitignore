@@ -9,6 +9,9 @@ tmp/
 .env
 .env.local
 
+# Zendesk CLI config (contains API keys)
+zcli.apps.config.json
+
 # IDE
 .vscode/
 .idea/

@@ -30,9 +30,17 @@
       "required": false,
       "secure": true,
       "default": ""
+    },
+    {
+      "name": "openai_api_key",
+      "type": "text",
+      "required": false,
+      "secure": true,
+      "default": ""
     }
   ],
   "domainWhitelist": [
-    "*.execute-api.*.amazonaws.com"
+    "*.execute-api.*.amazonaws.com",
+    "api.openai.com"
   ]
 }

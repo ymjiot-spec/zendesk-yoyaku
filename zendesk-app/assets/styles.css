@@ -674,8 +674,8 @@ body {
 }
 
 .chat-message.private-memo .chat-bubble {
-  background: #faf6ea;
-  border: 1px solid #e9dfc0;
+  background: #fff1d6;
+  border: 1px solid #f5d79e;
 }
 
 .chat-tag {
