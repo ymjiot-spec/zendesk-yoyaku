@@ -387,119 +387,107 @@ function analyzeTicketRisk(ticket) {
 async function analyzeTicketRiskWithAI(tickets) {
   if (!tickets || tickets.length === 0) return;
   
-  // 10件ずつバッチ処理（全件対応）
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < tickets.length; i += BATCH_SIZE) {
-    const batch = tickets.slice(i, i + BATCH_SIZE);
-    try {
-      await processTicketBatch(batch);
-    } catch (error) {
-      console.error(`バッチ${i / BATCH_SIZE + 1}エラー:`, error);
-    }
-  }
-  console.log('AIリスク判定全バッチ完了:', tickets.length, '件');
-}
-
-async function processTicketBatch(batchTickets) {
-  // 各チケットのコメントを並列取得
-  const commentPromises = batchTickets.map(async (t) => {
-    let commentText = '';
-    try {
-      const commentsResponse = await zafClient.request({
-        url: `/api/v2/tickets/${t.id}/comments.json`,
-        type: 'GET'
-      });
-      const comments = commentsResponse.comments || [];
-      const texts = comments.map(c => stripHTML(c.value || c.body || '').trim()).filter(t => t.length > 10);
-      commentText = texts.join(' ').substring(0, 400);
-    } catch (e) {
-      console.warn('コメント取得失敗:', t.id, e);
-      commentText = stripHTML(t.description || '').substring(0, 300);
-    }
-    return { id: t.id, text: commentText || '(内容なし)' };
-  });
+  // descriptionは既にSearch APIで取得済み → 追加API不要で高速
+  // 全件を1回のGPT呼び出しで処理（descriptionのみ使用で入力サイズ削減）
+  const ticketSummaries = tickets.map(t => {
+    const desc = stripHTML(t.description || '').trim();
+    // テンプレ・挨拶を除去して本質だけ抽出
+    let cleaned = desc.replace(/\n+/g, ' ').trim();
+    ['お問い合わせいただきありがとうございます', 'いつもお世話になっております',
+     'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
+     'よろしくお願いします', '何卒よろしくお願いいたします'].forEach(t => {
+      cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), '');
+    });
+    cleaned = cleaned.replace(/^[。、\s　]+/, '').trim();
+    return `ID:${t.id}\n${cleaned.substring(0, 200) || '(内容なし)'}`;
+  }).join('\n---\n');
   
-  const ticketData = await Promise.all(commentPromises);
-  const ticketSummaries = ticketData.map(d => `ID:${d.id}\n${d.text}`).join('\n---\n');
-  
-  const prompt = `あなたはコールセンターの品質管理AIです。以下の${batchTickets.length}件のチケットのやり取り内容を読んで分析してください。
+  const prompt = `あなたはコールセンターの品質管理AIです。以下の${tickets.length}件のチケットの問い合わせ内容を分析してください。
 
 ${ticketSummaries}
 
 【重要ルール】
-- summaryは件名やIDではなく、やり取りの内容から「何の問い合わせか」を判断して15文字以内で一言要約すること
-- 人名・ID番号・テンプレ文は絶対に含めないこと
-- 例：「通話料金の請求問い合わせ」「プラン変更依頼」「解約手続き」「eSIM設定不具合」「名義変更の相談」
+- summaryは「何の問い合わせか」を15文字以内で一言要約（必須）
+- 人名・ID番号・テンプレ文は絶対に含めず、問い合わせの本質だけ書くこと
+- 例：「退会後の通話料請求」「プラン変更依頼」「SIM届かない」「名義変更の相談」「決済ページ不具合」
 
-必ず全${batchTickets.length}件について以下のJSON配列で回答：
-[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内の一言要約"}]`;
+必ず全${tickets.length}件をJSON配列で回答：
+[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"15文字以内"}]`;
 
-  const response = await zafClient.request({
-    url: 'https://api.openai.com/v1/chat/completions',
-    type: 'POST',
-    contentType: 'application/json',
-    headers: {
-      'Authorization': 'Bearer ' + OPENAI_API_KEY
-    },
-    data: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-      max_tokens: 1500
-    })
-  });
+  try {
+    const response = await zafClient.request({
+      url: 'https://api.openai.com/v1/chat/completions',
+      type: 'POST',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'Bearer ' + OPENAI_API_KEY
+      },
+      data: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 3000
+      })
+    });
 
-  const content = response.choices[0].message.content.trim();
-  const jsonMatch = content.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return;
-  
-  const results = JSON.parse(jsonMatch[0]);
-  
-  results.forEach(result => {
-    const ticket = currentTickets.find(t => t.id == result.id);
-    if (!ticket) return;
+    const content = response.choices[0].message.content.trim();
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return;
     
-    const levelMap = {
-      'safe': { levelText: '通常', icon: '🟢' },
-      'warn': { levelText: '注意', icon: '⚠️' },
-      'danger': { levelText: 'クレーム', icon: '🔥' }
-    };
+    const results = JSON.parse(jsonMatch[0]);
     
-    const mapped = levelMap[result.level] || levelMap['safe'];
-    
-    ticket.riskAnalysis = {
-      complaintScore: result.score || 0,
-      level: result.level || 'safe',
-      levelText: mapped.levelText,
-      icon: mapped.icon,
-      reason: result.reason || '通常',
-      toxicity: result.score || 0,
-      repeatRisk: 0,
-      refundPressure: 0
-    };
-    
-    if (result.summary) {
-      ticket.aiSummary = result.summary;
-    }
-    
-    // DOM更新
-    const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
-    if (ticketEl) {
-      const badge = ticketEl.querySelector('.ticket-risk-badge');
-      if (badge) {
-        badge.className = `ticket-risk-badge ${result.level}`;
-        badge.textContent = `${mapped.icon} ${mapped.levelText}`;
-      }
-      ticketEl.dataset.risk = result.level;
+    results.forEach(result => {
+      const ticket = currentTickets.find(t => t.id == result.id);
+      if (!ticket) return;
+      
+      const levelMap = {
+        'safe': { levelText: '通常', icon: '🟢' },
+        'warn': { levelText: '注意', icon: '⚠️' },
+        'danger': { levelText: 'クレーム', icon: '🔥' }
+      };
+      
+      const mapped = levelMap[result.level] || levelMap['safe'];
+      
+      ticket.riskAnalysis = {
+        complaintScore: result.score || 0,
+        level: result.level || 'safe',
+        levelText: mapped.levelText,
+        icon: mapped.icon,
+        reason: result.reason || '通常',
+        toxicity: result.score || 0,
+        repeatRisk: 0,
+        refundPressure: 0
+      };
       
       if (result.summary) {
-        const summaryEl = ticketEl.querySelector('.ticket-summary');
-        if (summaryEl) {
-          summaryEl.textContent = `「${result.summary}」`;
+        ticket.aiSummary = result.summary;
+      }
+      
+      // DOM更新
+      const ticketEl = document.querySelector(`.ticket-item[data-ticket-id="${ticket.id}"]`);
+      if (ticketEl) {
+        const badge = ticketEl.querySelector('.ticket-risk-badge');
+        if (badge) {
+          badge.className = `ticket-risk-badge ${result.level}`;
+          badge.textContent = `${mapped.icon} ${mapped.levelText}`;
+        }
+        ticketEl.dataset.risk = result.level;
+        
+        if (result.summary) {
+          const summaryEl = ticketEl.querySelector('.ticket-summary');
+          if (summaryEl) {
+            summaryEl.textContent = `「${result.summary}」`;
+          }
         }
       }
-    }
-  });
+    });
+    
+    console.log('AI要約完了:', results.length, '件');
+    
+  } catch (error) {
+    console.error('AIリスク判定エラー:', error);
+    throw error;
+  }
 }
 
 /**
