@@ -23,25 +23,6 @@ function stripHTML(html) {
   return div.textContent || div.innerText || '';
 }
 
-// クレーム判定キーワード辞書（強化版）
-const COMPLAINT_KEYWORDS = {
-  high: [
-    '返金', '詐欺', '訴える', '弁護士', '消費者センター', 
-    '許せない', '最悪', '二度と', 'ふざけるな', '責任者',
-    '怒り', '対応しない', '解約', '騙された', '信じられない',
-    '謝罪', '賠償', '訴訟', 'クレーム', '激怒'
-  ],
-  medium: [
-    '不満', '困る', '納得できない', '説明不足', '対応悪い', 
-    '時間かかる', '遅い', '不誠実', '不親切', '改善',
-    '問題', 'トラブル', '困った', '心配'
-  ],
-  low: [
-    '確認', '問い合わせ', '教えて', '質問', 'わからない',
-    '知りたい', '聞きたい', '相談'
-  ]
-};
-
 /**
  * アプリ初期化
  */
@@ -271,67 +252,18 @@ async function fetchTicketHistory(email) {
 }
 
 /**
- * チケットリスク分析（強化版）
+ * チケットリスク分析（初期表示用・GPT判定前のプレースホルダー）
  */
 function analyzeTicketRisk(ticket) {
-  const text = `${ticket.subject || ''} ${ticket.description || ''}`.toLowerCase();
-  
-  let complaintScore = 0;
-  let matchedKeywords = [];
-  
-  // 高リスクキーワードマッチング（各30点）
-  COMPLAINT_KEYWORDS.high.forEach(keyword => {
-    if (text.includes(keyword)) {
-      complaintScore += 30;
-      matchedKeywords.push(keyword);
-    }
-  });
-  
-  // 中リスクキーワードマッチング（各15点）
-  COMPLAINT_KEYWORDS.medium.forEach(keyword => {
-    if (text.includes(keyword)) {
-      complaintScore += 15;
-      if (matchedKeywords.length === 0) matchedKeywords.push(keyword);
-    }
-  });
-  
-  // 低リスクキーワードマッチング（各5点）
-  COMPLAINT_KEYWORDS.low.forEach(keyword => {
-    if (text.includes(keyword)) {
-      complaintScore += 5;
-      if (matchedKeywords.length === 0) matchedKeywords.push(keyword);
-    }
-  });
-  
-  // スコア正規化（最大100）
-  complaintScore = Math.min(100, complaintScore);
-  
-  // レベル判定（閾値再設計）
-  let level = 'safe';
-  let levelText = '通常';
-  let icon = '🟢';
-  
-  if (complaintScore >= 50) {
-    level = 'danger';
-    levelText = 'クレーム';
-    icon = '🔥';
-  } else if (complaintScore >= 25) {
-    level = 'warn';
-    levelText = '注意';
-    icon = '⚠';
-  }
-  
-  const reason = matchedKeywords.length > 0 ? matchedKeywords[0] : '通常';
-  
   return {
-    complaintScore,
-    level,
-    levelText,
-    icon,
-    reason,
-    toxicity: complaintScore,
+    complaintScore: 0,
+    level: 'safe',
+    levelText: '通常',
+    icon: '🟢',
+    reason: '通常',
+    toxicity: 0,
     repeatRisk: 0,
-    refundPressure: text.includes('返金') ? 80 : 0
+    refundPressure: 0
   };
 }
 
@@ -349,7 +281,13 @@ async function analyzeTicketRiskWithAI(tickets) {
     return `${t.id}:${desc.substring(0, 80) || '不明'}`;
   }).join('\n');
   
-  const prompt = `チケット分析。JSON配列で回答。summaryは問い合わせ内容を具体的に30文字程度で要約（人名除外）。dangerは明確な怒りのみ。
+  const prompt = `チケット分析。JSON配列で回答。summaryは問い合わせ内容を具体的に30文字程度で要約（人名除外）。
+
+level判定基準（文章のトーン・感情で判断すること）：
+- danger: 顧客が怒っている。怒りの感情表現・クレーム・返金要求・訴訟示唆・「許せない」「ふざけるな」等。不具合の報告や改善要望はdangerではない
+- warn: 不満や困惑を感じているが怒りではない。「困っている」「納得できない」「改善してほしい」等の要望レベル
+- safe: 通常の問い合わせ・確認・依頼・手続き・丁寧なお願い。迷惑をかけた側が謝っている場合もsafe
+
 ${ticketSummaries}
 [{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"30文字程度の具体的要約"}]`;
 
