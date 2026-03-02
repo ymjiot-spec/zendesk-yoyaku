@@ -560,26 +560,18 @@ function createTicketItem(ticket) {
     const risk = ticket.riskAnalysis || { complaintScore: 0, levelText: '通常', icon: '🟢', level: 'safe' };
     const datetime = formatDateTime(ticket.created_at);
     
-    // 件名が意味不明（人名・短すぎ・内容不明）な場合はdescriptionから要約を生成
-    let summary = ticket.subject || '問い合わせ';
+    // descriptionから要約を生成（常にdescriptionを使う）
     const desc = stripHTML(ticket.description || '').trim();
-    // 件名が短い（8文字以下）or 内容を表していない場合 → descriptionを使う
-    const isUselessSubject = summary.length <= 8 || 
-      /^[\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ffA-Za-z0-9\s　・]+$/.test(summary);
-    if (desc.length > 10 && isUselessSubject) {
+    let summary = '';
+    if (desc.length > 5) {
       let cleanDesc = desc.replace(/\n+/g, ' ').trim();
-      // テンプレ・人名・挨拶を除去
-      ['お問い合わせいただきありがとうございます', 'いつもお世話になっております', 
-       'お世話になっております', 'お疲れ様です', 'ご担当者様', 'よろしくお願いいたします',
-       'よろしくお願いします'].forEach(t => {
-        cleanDesc = cleanDesc.replace(new RegExp(t + '[。、\\s]*', 'g'), '');
-      });
-      cleanDesc = cleanDesc.replace(/^[。、\s　]+/, '').trim();
-      if (cleanDesc.length > 5) {
-        summary = cleanDesc;
-      }
+      const removeGreetings = /(?:お問い合わせいただきありがとうございます|いつもお世話になっております|お世話になっております|お疲れ様です|ご担当者様|よろしくお願い(?:いた)?します|何卒よろしくお願いいたします|ありがとうございます)[。、\s]*/g;
+      cleanDesc = cleanDesc.replace(removeGreetings, '').replace(/^[。、\s　]+/, '').trim();
+      summary = cleanDesc.length > 5 ? cleanDesc : (ticket.subject || '問い合わせ');
+    } else {
+      summary = ticket.subject || '問い合わせ';
     }
-    summary = truncateText(summary, 40);
+    summary = truncateText(summary, 80);
     const status = translateStatus(ticket.status);
     const ticketNumber = `#${ticket.id}`;
     const channel = getChannelInfo(ticket);

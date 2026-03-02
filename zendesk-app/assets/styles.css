@@ -518,10 +518,10 @@ body {
 }
 
 .ticket-summary {
-  font-size: 13px;
-  color: #1f2937;
-  font-weight: 500;
-  line-height: 1.5;
+  font-size: 11px;
+  color: #4b5563;
+  font-weight: 400;
+  line-height: 1.6;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
