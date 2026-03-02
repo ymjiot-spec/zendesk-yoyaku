@@ -582,6 +582,7 @@ function createTicketItem(ticket) {
     summary = truncateText(summary, 40);
     const status = translateStatus(ticket.status);
     const ticketNumber = `#${ticket.id}`;
+    const channel = getChannelInfo(ticket);
     
     div.dataset.risk = risk.level;
     
@@ -595,6 +596,7 @@ function createTicketItem(ticket) {
     
     contentDiv.innerHTML = `
       <div class="ticket-header">
+        <span class="ticket-channel" title="${escapeHtml(channel.label)}">${channel.icon}</span>
         <a href="#" class="ticket-number-link" data-ticket-id="${ticket.id}">${escapeHtml(ticketNumber)}</a>
         <span class="ticket-datetime">${escapeHtml(datetime)}</span>
         <span class="ticket-risk-badge ${risk.level}">${risk.icon} ${risk.levelText}</span>
@@ -740,6 +742,24 @@ function translateStatus(status) {
     'closed': '終了'
   };
   return map[status] || status;
+}
+
+/**
+ * チャネル情報取得（電話・メール・Web等）
+ */
+function getChannelInfo(ticket) {
+  const channel = (ticket.via && ticket.via.channel) || '';
+  const map = {
+    'voice': { icon: '📞', label: '電話' },
+    'phone': { icon: '📞', label: '電話' },
+    'email': { icon: '✉️', label: 'メール' },
+    'web':   { icon: '🌐', label: 'Web' },
+    'chat':  { icon: '💬', label: 'チャット' },
+    'api':   { icon: '🔗', label: 'API' },
+    'twitter': { icon: '🐦', label: 'Twitter' },
+    'facebook': { icon: '📘', label: 'Facebook' }
+  };
+  return map[channel] || { icon: '📩', label: channel || '不明' };
 }
 
 /**

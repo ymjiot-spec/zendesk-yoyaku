@@ -442,6 +442,11 @@ body {
   flex-wrap: wrap;
 }
 
+.ticket-channel {
+  font-size: 13px;
+  cursor: default;
+}
+
 .ticket-number-link {
   font-weight: 700;
   color: #3b82f6;
