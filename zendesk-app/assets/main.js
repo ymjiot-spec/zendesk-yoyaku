@@ -155,6 +155,10 @@ async function startApp() {
       return;
     }
     
+    // 依頼者ID取得（メモ機能用）
+    const reqData = await zafClient.get('ticket.requester');
+    const requesterId = reqData['ticket.requester'] ? reqData['ticket.requester'].id : null;
+    
     // チケット履歴取得
     const tickets = await fetchTicketHistory(requesterEmail);
     currentTickets = tickets;
@@ -165,7 +169,7 @@ async function startApp() {
     // UI表示
     renderCustomerRisk(customerRiskData);
     renderTicketList(tickets);
-    await loadExistingMemos(requesterEmail);
+    await loadExistingMemos(requesterId);
     
     hideLoading();
     showContent();
@@ -1435,50 +1439,141 @@ function buildFallbackMessages(summary) {
 }
 
 /**
- * メモ保存 - 安全なDOM操作
+ * メモ保存 - Zendesk User notesに永続化
  */
 async function handleSaveMemo() {
   const input = document.getElementById('memo-input');
-  
-  if (!input) {
-    console.error('memo-input element not found');
-    return;
-  }
+  if (!input) return;
   
   const text = input.value.trim();
-  
   if (!text) {
     showError('メモを入力してください');
     return;
   }
   
   try {
-    // 依頼者情報取得
     const requesterData = await zafClient.get('ticket.requester');
     const requesterId = requesterData['ticket.requester'].id;
     
-    // メモ保存（ユーザーフィールドに保存）
-    // 注：実際の実装ではカスタムフィールドやタグを使用
+    // 現在のnotesを取得
+    const userResponse = await zafClient.request({
+      url: `/api/v2/users/${requesterId}.json`,
+      type: 'GET'
+    });
+    const currentNotes = userResponse.user.notes || '';
+    
+    // 新しいメモを追記（日時付き）
+    const timestamp = formatDateTime(new Date().toISOString());
+    const newEntry = `[${timestamp}] ${text}`;
+    const updatedNotes = currentNotes ? `${newEntry}\n---\n${currentNotes}` : newEntry;
+    
+    // User APIで保存
+    await zafClient.request({
+      url: `/api/v2/users/${requesterId}.json`,
+      type: 'PUT',
+      contentType: 'application/json',
+      data: JSON.stringify({ user: { notes: updatedNotes } })
+    });
     
     // UI更新
     addMemoToUI(text, new Date());
-    
     input.value = '';
     
-    alert('メモを保存しました');
+    // 保存成功フィードバック
+    const btn = document.getElementById('save-memo-btn');
+    if (btn) {
+      const btnText = btn.querySelector('.btn-text');
+      if (btnText) {
+        btnText.textContent = '✓ 保存済み';
+        setTimeout(() => { btnText.textContent = 'メモを保存'; }, 2000);
+      }
+    }
     
   } catch (error) {
     console.error('メモ保存エラー:', error);
-    showError('メモの保存に失敗しました', error);
+    showError('メモの保存に失敗しました');
   }
 }
 
 /**
- * 既存メモ読み込み
+ * 既存メモ読み込み - Zendesk User notesから取得 + 自動社内メモ投稿
  */
-async function loadExistingMemos(requesterEmail) {
-  // 注：実際の実装ではカスタムフィールドやタグから取得
-  // 今はダミー
+async function loadExistingMemos(requesterId) {
+  if (!requesterId) return;
+  
+  try {
+    const userResponse = await zafClient.request({
+      url: `/api/v2/users/${requesterId}.json`,
+      type: 'GET'
+    });
+    const notes = userResponse.user.notes || '';
+    if (!notes) return;
+    
+    // メモをUIに表示
+    const container = document.getElementById('existing-memos');
+    if (container) {
+      const entries = notes.split('\n---\n');
+      entries.forEach(entry => {
+        if (!entry.trim()) return;
+        const match = entry.match(/^\[(.+?)\]\s*(.+)$/s);
+        const item = document.createElement('div');
+        item.className = 'memo-item';
+        if (match) {
+          item.innerHTML = `
+            <div class="memo-date">${escapeHtml(match[1])}</div>
+            <div class="memo-text">${escapeHtml(match[2].trim())}</div>
+          `;
+        } else {
+          item.innerHTML = `<div class="memo-text">${escapeHtml(entry.trim())}</div>`;
+        }
+        container.appendChild(item);
+      });
+    }
+    
+    // 自動社内メモ投稿：現在のチケットに引き継ぎメモを社内コメントとして追加
+    try {
+      const ticketData = await zafClient.get('ticket.id');
+      const ticketId = ticketData['ticket.id'];
+      
+      // 最新のメモエントリを取得（最初の1件）
+      const firstEntry = notes.split('\n---\n')[0].trim();
+      if (firstEntry) {
+        const memoText = `⚡ 顧客引き継ぎメモ（自動投稿）\n${firstEntry}`;
+        
+        // 既に同じ内容の社内メモがないか確認
+        const commentsResponse = await zafClient.request({
+          url: `/api/v2/tickets/${ticketId}/comments.json`,
+          type: 'GET'
+        });
+        const existingComments = commentsResponse.comments || [];
+        const alreadyPosted = existingComments.some(c => {
+          const body = stripHTML(c.body || c.value || '');
+          return body.includes('顧客引き継ぎメモ（自動投稿）');
+        });
+        
+        if (!alreadyPosted) {
+          await zafClient.request({
+            url: `/api/v2/tickets/${ticketId}.json`,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({
+              ticket: {
+                comment: {
+                  body: memoText,
+                  public: false
+                }
+              }
+            })
+          });
+        }
+      }
+    } catch (autoMemoError) {
+      // 自動メモ投稿失敗は無視（チケットが終了済みの場合など）
+    }
+    
+  } catch (error) {
+    console.error('メモ読み込みエラー:', error);
+  }
 }
 
 /**
