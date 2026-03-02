@@ -1439,45 +1439,25 @@ function buildFallbackMessages(summary) {
 }
 
 /**
- * メモ保存 - Zendesk User notesに永続化
+ * メモ保存 - Zendesk User notesに上書き保存
  */
 async function handleSaveMemo() {
   const input = document.getElementById('memo-input');
   if (!input) return;
   
   const text = input.value.trim();
-  if (!text) {
-    showError('メモを入力してください');
-    return;
-  }
   
   try {
     const requesterData = await zafClient.get('ticket.requester');
     const requesterId = requesterData['ticket.requester'].id;
     
-    // 現在のnotesを取得
-    const userResponse = await zafClient.request({
-      url: `/api/v2/users/${requesterId}.json`,
-      type: 'GET'
-    });
-    const currentNotes = userResponse.user.notes || '';
-    
-    // 新しいメモを追記（日時付き）
-    const timestamp = formatDateTime(new Date().toISOString());
-    const newEntry = `[${timestamp}] ${text}`;
-    const updatedNotes = currentNotes ? `${newEntry}\n---\n${currentNotes}` : newEntry;
-    
-    // User APIで保存
+    // User APIで上書き保存
     await zafClient.request({
       url: `/api/v2/users/${requesterId}.json`,
       type: 'PUT',
       contentType: 'application/json',
-      data: JSON.stringify({ user: { notes: updatedNotes } })
+      data: JSON.stringify({ user: { notes: text } })
     });
-    
-    // UI更新
-    addMemoToUI(text, new Date());
-    input.value = '';
     
     // 保存成功フィードバック
     const btn = document.getElementById('save-memo-btn');
@@ -1496,7 +1476,7 @@ async function handleSaveMemo() {
 }
 
 /**
- * 既存メモ読み込み - Zendesk User notesから取得 + 自動社内メモ投稿
+ * 既存メモ読み込み - Zendesk User notesからテキストエリアにセット + 自動社内メモ投稿
  */
 async function loadExistingMemos(requesterId) {
   if (!requesterId) return;
@@ -1507,38 +1487,18 @@ async function loadExistingMemos(requesterId) {
       type: 'GET'
     });
     const notes = userResponse.user.notes || '';
-    if (!notes) return;
     
-    // メモをUIに表示
-    const container = document.getElementById('existing-memos');
-    if (container) {
-      const entries = notes.split('\n---\n');
-      entries.forEach(entry => {
-        if (!entry.trim()) return;
-        const match = entry.match(/^\[(.+?)\]\s*(.+)$/s);
-        const item = document.createElement('div');
-        item.className = 'memo-item';
-        if (match) {
-          item.innerHTML = `
-            <div class="memo-date">${escapeHtml(match[1])}</div>
-            <div class="memo-text">${escapeHtml(match[2].trim())}</div>
-          `;
-        } else {
-          item.innerHTML = `<div class="memo-text">${escapeHtml(entry.trim())}</div>`;
-        }
-        container.appendChild(item);
-      });
+    // テキストエリアにセット
+    const input = document.getElementById('memo-input');
+    if (input && notes) {
+      input.value = notes;
     }
     
-    // 自動社内メモ投稿：現在のチケットに引き継ぎメモを社内コメントとして追加
-    try {
-      const ticketData = await zafClient.get('ticket.id');
-      const ticketId = ticketData['ticket.id'];
-      
-      // 最新のメモエントリを取得（最初の1件）
-      const firstEntry = notes.split('\n---\n')[0].trim();
-      if (firstEntry) {
-        const memoText = `⚡ 顧客引き継ぎメモ（自動投稿）\n${firstEntry}`;
+    // 自動社内メモ投稿：メモがあれば現在のチケットに社内コメントとして追加
+    if (notes) {
+      try {
+        const ticketData = await zafClient.get('ticket.id');
+        const ticketId = ticketData['ticket.id'];
         
         // 既に同じ内容の社内メモがないか確認
         const commentsResponse = await zafClient.request({
@@ -1548,7 +1508,7 @@ async function loadExistingMemos(requesterId) {
         const existingComments = commentsResponse.comments || [];
         const alreadyPosted = existingComments.some(c => {
           const body = stripHTML(c.body || c.value || '');
-          return body.includes('顧客引き継ぎメモ（自動投稿）');
+          return body.includes('顧客メモ（自動投稿）');
         });
         
         if (!alreadyPosted) {
@@ -1559,40 +1519,21 @@ async function loadExistingMemos(requesterId) {
             data: JSON.stringify({
               ticket: {
                 comment: {
-                  body: memoText,
+                  body: `⚡ 顧客メモ（自動投稿）\n${notes}`,
                   public: false
                 }
               }
             })
           });
         }
+      } catch (autoMemoError) {
+        // 自動メモ投稿失敗は無視（チケットが終了済みの場合など）
       }
-    } catch (autoMemoError) {
-      // 自動メモ投稿失敗は無視（チケットが終了済みの場合など）
     }
     
   } catch (error) {
     console.error('メモ読み込みエラー:', error);
   }
-}
-
-/**
- * メモUI追加 - 安全なDOM操作
- */
-function addMemoToUI(text, date) {
-  const container = document.getElementById('existing-memos');
-  if (!container) {
-    console.error('existing-memos element not found');
-    return;
-  }
-  
-  const item = document.createElement('div');
-  item.className = 'memo-item';
-  item.innerHTML = `
-    <div class="memo-date">${formatDateTime(date.toISOString())}</div>
-    <div class="memo-text">${escapeHtml(text)}</div>
-  `;
-  container.insertBefore(item, container.firstChild);
 }
 
 /**
