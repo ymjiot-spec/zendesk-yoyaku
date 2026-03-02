@@ -346,12 +346,12 @@ async function analyzeTicketRiskWithAI(tickets) {
   
   const ticketSummaries = tickets.map(t => {
     const desc = stripHTML(t.description || '').replace(/\n+/g, ' ').replace(removeGreetings, '').replace(/^[。、\s　]+/, '').trim();
-    return `${t.id}:${desc.substring(0, 40) || '不明'}`;
+    return `${t.id}:${desc.substring(0, 80) || '不明'}`;
   }).join('\n');
   
-  const prompt = `チケット分析。JSON配列で回答。summaryは10文字以内。dangerは明確な怒りのみ。
+  const prompt = `チケット分析。JSON配列で回答。summaryは問い合わせ内容を具体的に30文字程度で要約（人名除外）。dangerは明確な怒りのみ。
 ${ticketSummaries}
-[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"要約"}]`;
+[{"id":数値,"level":"safe/warn/danger","score":0-100,"summary":"30文字程度の具体的要約"}]`;
 
   try {
     const response = await zafClient.request({
@@ -365,7 +365,7 @@ ${ticketSummaries}
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0,
-        max_tokens: Math.max(800, tickets.length * 80)
+        max_tokens: Math.max(1200, tickets.length * 120)
       })
     });
 
