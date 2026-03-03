@@ -1208,7 +1208,7 @@ function generateModernSummary(tickets) {
       const isSystem = !isMerge && (rawText.includes('解決済み') || rawText.includes('にしました') || 
         rawText.includes('次の記事') || rawText.includes('解決策を見つけ') ||
         (c.via && c.via.channel === 'system'));
-      const isCustomer = !isSystem && !isMerge && requesterId && c.author_id == requesterId;
+      const isCustomer = !isSystem && !isMerge && requesterId && c.author_id == requesterId && !isPrivate;
       
       let type, text;
       if (isMerge) {
@@ -1224,13 +1224,15 @@ function generateModernSummary(tickets) {
       } else if (isCustomer) {
         type = 'customer';
         const cleaned = cleanText(rawText);
-        if (cleaned.length === 0) return;
-        text = cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : '');
+        text = (cleaned.length > 0 ? cleaned : rawText).substring(0, 80);
+        if (text.length === 0) return;
+        text = text + ((cleaned.length > 80 || rawText.length > 80) ? '...' : '');
       } else {
         type = 'operator';
         const cleaned = cleanText(rawText);
-        if (cleaned.length === 0) return;
-        text = cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : '');
+        text = (cleaned.length > 0 ? cleaned : rawText).substring(0, 80);
+        if (text.length === 0) return;
+        text = text + ((cleaned.length > 80 || rawText.length > 80) ? '...' : '');
       }
       
       orderedMessages.push({ type, text });
