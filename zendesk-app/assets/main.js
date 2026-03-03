@@ -795,13 +795,6 @@ async function handleCurrentTicketSummary() {
       })
     };
     
-    console.log('=== DEBUG handleCurrentTicketSummary ===');
-    console.log('ticketId:', ticketId);
-    console.log('requesterId:', requesterId);
-    console.log('comments count:', comments.length);
-    console.log('comments:', JSON.stringify(comments.slice(0, 3), null, 2));
-    console.log('description:', ticketData['ticket.description']);
-    
     // 要約生成
     let summary = generateModernSummary([currentTicket]);
     
@@ -1208,11 +1201,8 @@ function generateModernSummary(tickets) {
   
   // コメントから顧客メッセージを抽出（最初のコメントが顧客の問い合わせ内容）
   if (ticket.comments && ticket.comments.length > 0) {
-    console.log('=== DEBUG: コメント解析開始 ===');
-    console.log('requesterId:', requesterId);
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
-      console.log(`コメント${idx}:`, { author_id: c.author_id, public: c.public, text: rawText.substring(0, 50) });
       if (rawText.length < 1) return;
       
       // publicフィールドの判定（undefined/nullはpublicとみなす）
@@ -1228,11 +1218,11 @@ function generateModernSummary(tickets) {
       // author_idとrequester_idを数値に変換して比較
       const authorId = c.author_id ? Number(c.author_id) : 0;
       const reqId = requesterId ? Number(requesterId) : 0;
-      // author_idがない場合、publicなコメントの最初のものはお客様と仮定
-      const isCustomerAuthor = (reqId > 0 && authorId === reqId) || (authorId === 0 && !isPrivate && idx === 0);
+      // 最初のpublicコメントは必ず顧客メッセージ、またはauthor_id == requester_id
+      const isFirstPublicComment = idx === 0 && !isPrivate;
+      const isCustomerAuthor = isFirstPublicComment || (reqId > 0 && authorId === reqId);
       
       let type, text;
-      console.log(`コメント${idx} 判定:`, { isPrivate, isMerge, isAutoMemo, isSystem, isCustomerAuthor, authorId, reqId });
       if (isMerge) {
         type = 'memo';
         const ticketMatch = rawText.match(/#(\d{4,})/);
@@ -1258,7 +1248,6 @@ function generateModernSummary(tickets) {
       }
       
       orderedMessages.push({ type, text });
-      console.log(`コメント${idx} 結果:`, { type, text });
     });
   }
   
