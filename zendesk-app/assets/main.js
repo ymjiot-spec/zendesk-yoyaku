@@ -953,7 +953,7 @@ async function summarizeOrderedMessages(orderedMessages, subject, status) {
   // 要約対象（customer/operator/memo）を抽出
   const targets = [];
   orderedMessages.forEach((msg, i) => {
-    if ((msg.type === 'customer' || msg.type === 'operator' || msg.type === 'memo') && msg.text && msg.text.length > 25) {
+    if ((msg.type === 'customer' || msg.type === 'operator' || msg.type === 'memo') && msg.text && msg.text.length > 10) {
       const label = msg.type === 'customer' ? '客' : msg.type === 'operator' ? 'OP' : 'メモ';
       targets.push({ idx: i, label, text: msg.text });
     }
@@ -963,7 +963,7 @@ async function summarizeOrderedMessages(orderedMessages, subject, status) {
   
   const lines = targets.map(t => `${t.idx}|${t.label}|${t.text.substring(0, 200)}`).join('\n');
   
-  const prompt = `通信会社コールセンターのチケット。各コメントを20文字以内で要約。挨拶・定型文・名前除去、用件の本質のみ。GB=通信量、ID=回線ID。JSON配列で回答。
+  const prompt = `通信会社コールセンターのチケット。各コメントを40文字程度で要約（2行くらい）。挨拶・定型文・名前除去、用件の本質のみ。GB=通信量、ID=回線ID。JSON配列で回答。
 件名:${subject || ''} ステータス:${status || ''}
 ${lines}
 [{"i":番号,"s":"要約"}]`;
@@ -1029,7 +1029,7 @@ function generateModernSummary(tickets) {
     // 有効コメント抽出：HTML除去後に20文字以上
     validComments = ticket.comments.filter(c => {
       const text = stripHTML(c.value || c.body || c.plain_body || '').trim();
-      return text.length > 20;
+      return text.length > 0;
     });
     
     // requester_idでお客様とオペレーターを分類
@@ -1201,7 +1201,7 @@ function generateModernSummary(tickets) {
     
     ticket.comments.forEach(c => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
-      if (rawText.length < 5) return;
+      if (rawText.length < 1) return;
       
       const isPrivate = c.public === false || c.public === 'false';
       const isMerge = rawText.includes('統合させていただきました');
@@ -1225,12 +1225,12 @@ function generateModernSummary(tickets) {
         type = 'customer';
         const cleaned = cleanText(rawText);
         if (cleaned.length === 0) return;
-        text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+        text = cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : '');
       } else {
         type = 'operator';
         const cleaned = cleanText(rawText);
         if (cleaned.length === 0) return;
-        text = cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+        text = cleaned.substring(0, 80) + (cleaned.length > 80 ? '...' : '');
       }
       
       orderedMessages.push({ type, text });
