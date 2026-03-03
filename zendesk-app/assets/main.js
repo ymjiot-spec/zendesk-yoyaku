@@ -1403,22 +1403,40 @@ async function loadExistingMemos(requesterId) {
       input.value = notes;
     }
     
-    // 自動社内メモ投稿：メモがあれば現在のチケットに社内コメントとして追加
+    // 自動社内メモ投稿：メモがあれば現在のチケットに社内コメントとして追加（初回のみ）
     if (notes) {
       try {
         const ticketData = await zafClient.get('ticket.id');
         const ticketId = ticketData['ticket.id'];
         
-        // 既に同じ内容の社内メモがないか確認
-        const commentsResponse = await zafClient.request({
-          url: `/api/v2/tickets/${ticketId}/comments.json`,
-          type: 'GET'
-        });
-        const existingComments = commentsResponse.comments || [];
-        const alreadyPosted = existingComments.some(c => {
-          const body = stripHTML(c.body || c.value || '');
-          return body.includes('顧客メモ（自動投稿）');
-        });
+        // 既に同じ内容の社内メモがないか確認（Audits APIで確実にチェック）
+        let alreadyPosted = false;
+        try {
+          const auditsResponse = await zafClient.request({
+            url: `/api/v2/tickets/${ticketId}/audits.json`,
+            type: 'GET'
+          });
+          const audits = auditsResponse.audits || [];
+          alreadyPosted = audits.some(audit => {
+            if (!audit.events) return false;
+            return audit.events.some(event => {
+              if (event.type !== 'Comment') return false;
+              const body = stripHTML(event.html_body || event.body || '');
+              return body.includes('顧客メモ（自動投稿）');
+            });
+          });
+        } catch (auditErr) {
+          // Audits API失敗時はComments APIでフォールバック
+          const commentsResponse = await zafClient.request({
+            url: `/api/v2/tickets/${ticketId}/comments.json`,
+            type: 'GET'
+          });
+          const existingComments = commentsResponse.comments || [];
+          alreadyPosted = existingComments.some(c => {
+            const body = stripHTML(c.body || c.value || '');
+            return body.includes('顧客メモ（自動投稿）');
+          });
+        }
         
         if (!alreadyPosted) {
           await zafClient.request({
