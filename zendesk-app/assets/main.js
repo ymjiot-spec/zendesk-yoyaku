@@ -1184,20 +1184,32 @@ function generateModernSummary(tickets) {
   
   // 時系列順メッセージ配列を生成
   const orderedMessages = [];
+  
+  // テンプレ除去関数
+  const cleanText = (text) => {
+    const templates = [
+      'お問い合わせいただきありがとうございます', 'いつもお世話になっております',
+      'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
+      'よろしくお願いします', '何卒よろしくお願いいたします', '何卒よろしくお願いします',
+      'ありがとうございます', 'お手数ですが', '恐れ入りますが', '下記をご確認ください'
+    ];
+    let cleaned = text.replace(/\n+/g, ' ').trim();
+    templates.forEach(t => { cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), ''); });
+    cleaned = cleaned.replace(/^[。、\s]+/, '').trim();
+    return cleaned;
+  };
+  
+  // descriptionを最初のお客様メッセージとして追加（commentsに含まれてない場合）
+  if (ticket.description) {
+    const descText = stripHTML(ticket.description).trim();
+    if (descText.length > 0) {
+      const cleaned = cleanText(descText);
+      const text = (cleaned.length > 0 ? cleaned : descText).substring(0, 80) + (descText.length > 80 ? '...' : '');
+      orderedMessages.push({ type: 'customer', text: text });
+    }
+  }
+  
   if (ticket.comments && ticket.comments.length > 0) {
-    // テンプレ除去関数
-    const cleanText = (text) => {
-      const templates = [
-        'お問い合わせいただきありがとうございます', 'いつもお世話になっております',
-        'お世話になっております', 'お疲れ様です', 'よろしくお願いいたします',
-        'よろしくお願いします', '何卒よろしくお願いいたします', '何卒よろしくお願いします',
-        'ありがとうございます', 'お手数ですが', '恐れ入りますが', '下記をご確認ください'
-      ];
-      let cleaned = text.replace(/\n+/g, ' ').trim();
-      templates.forEach(t => { cleaned = cleaned.replace(new RegExp(t + '[。、\\s]*', 'g'), ''); });
-      cleaned = cleaned.replace(/^[。、\s]+/, '').trim();
-      return cleaned;
-    };
     
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
