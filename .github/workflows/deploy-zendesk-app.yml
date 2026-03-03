@@ -33,14 +33,20 @@ jobs:
         with:
           name: zendesk-app
       - name: Deploy to Zendesk (env1)
+        env:
+          ZD_SUB: ${{ secrets.ZENDESK_SUBDOMAIN_1 }}
+          ZD_EMAIL: ${{ secrets.ZENDESK_EMAIL_1 }}
+          ZD_TOKEN: ${{ secrets.ZENDESK_API_TOKEN_1 }}
+          ZD_APP_ID: ${{ secrets.ZENDESK_APP_INSTALLATION_ID_1 }}
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -u "${{ secrets.ZENDESK_EMAIL_1 }}/token:${{ secrets.ZENDESK_API_TOKEN_1 }}" \
-            -F "uploaded_data=@ticket-history-app.zip" \
-            -X PUT \
-            "https://${{ secrets.ZENDESK_SUBDOMAIN_1 }}.zendesk.com/api/v2/apps/installations/${{ secrets.ZENDESK_APP_INSTALLATION_ID_1 }}.json")
+          URL="https://${ZD_SUB}.zendesk.com/api/v2/apps/installations/${ZD_APP_ID}.json"
+          echo "Deploying to: ${URL}"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -u "${ZD_EMAIL}/token:${ZD_TOKEN}" -F "uploaded_data=@ticket-history-app.zip" -X PUT "${URL}")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env1 failed: HTTP $HTTP_CODE"; exit 1; fi
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env1 failed"; exit 1; fi
           echo "✅ env1 deployed"
 
   deploy-env2:
