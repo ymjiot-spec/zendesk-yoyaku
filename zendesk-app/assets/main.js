@@ -795,6 +795,13 @@ async function handleCurrentTicketSummary() {
       })
     };
     
+    console.log('=== DEBUG handleCurrentTicketSummary ===');
+    console.log('ticketId:', ticketId);
+    console.log('requesterId:', requesterId);
+    console.log('comments count:', comments.length);
+    console.log('comments:', JSON.stringify(comments.slice(0, 3), null, 2));
+    console.log('description:', ticketData['ticket.description']);
+    
     // 要約生成
     let summary = generateModernSummary([currentTicket]);
     
