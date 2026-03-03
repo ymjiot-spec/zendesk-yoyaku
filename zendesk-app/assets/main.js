@@ -1201,8 +1201,11 @@ function generateModernSummary(tickets) {
   
   // コメントから顧客メッセージを抽出（最初のコメントが顧客の問い合わせ内容）
   if (ticket.comments && ticket.comments.length > 0) {
+    console.log('=== DEBUG: コメント解析開始 ===');
+    console.log('requesterId:', requesterId);
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
+      console.log(`コメント${idx}:`, { author_id: c.author_id, public: c.public, text: rawText.substring(0, 50) });
       if (rawText.length < 1) return;
       
       // publicフィールドの判定（undefined/nullはpublicとみなす）
@@ -1222,6 +1225,7 @@ function generateModernSummary(tickets) {
       const isCustomerAuthor = (reqId > 0 && authorId === reqId) || (authorId === 0 && !isPrivate && idx === 0);
       
       let type, text;
+      console.log(`コメント${idx} 判定:`, { isPrivate, isMerge, isAutoMemo, isSystem, isCustomerAuthor, authorId, reqId });
       if (isMerge) {
         type = 'memo';
         const ticketMatch = rawText.match(/#(\d{4,})/);
@@ -1247,6 +1251,7 @@ function generateModernSummary(tickets) {
       }
       
       orderedMessages.push({ type, text });
+      console.log(`コメント${idx} 結果:`, { type, text });
     });
   }
   
