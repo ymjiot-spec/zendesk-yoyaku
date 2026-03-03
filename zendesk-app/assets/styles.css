@@ -4,9 +4,8 @@
 }
 
 html, body {
-  height: auto;
-  min-height: 100%;
-  overflow: visible;
+  height: 100%;
+  overflow: hidden;
   margin: 0;
   padding: 0;
   width: 100%;
@@ -21,7 +20,7 @@ body {
 }
 
 #app-root {
-  height: auto;
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -38,7 +37,7 @@ body {
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -578,11 +577,12 @@ body {
   border-bottom: 2px solid #e5e7eb;
   margin: 0;
   padding: 0;
-  max-height: none;
+  max-height: 50vh;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .summary-header {
@@ -736,8 +736,7 @@ body {
   padding: 12px;
   background: #fafbfc;
   border-top: 1px solid #e5e7eb;
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 10;
 }
 

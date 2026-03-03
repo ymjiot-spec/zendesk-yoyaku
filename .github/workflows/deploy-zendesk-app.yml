@@ -1,0 +1,101 @@
+name: Deploy Zendesk App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'zendesk-app/assets/**'
+      - 'zendesk-app/manifest.json'
+      - 'zendesk-app/translations/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ZIP
+        run: |
+          cd zendesk-app
+          zip -r ../ticket-history-app.zip manifest.json assets/ translations/ -x "*.DS_Store" "assets/logo.svg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zendesk-app
+          path: ticket-history-app.zip
+
+  deploy-env1:
+    needs: build
+    runs-on: ubuntu-latest
+    if: vars.DEPLOY_ENV1 == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zendesk-app
+      - name: Deploy to Zendesk (env1)
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -u "${{ secrets.ZENDESK_EMAIL_1 }}/token:${{ secrets.ZENDESK_API_TOKEN_1 }}" \
+            -F "uploaded_data=@ticket-history-app.zip" \
+            -X PUT \
+            "https://${{ secrets.ZENDESK_SUBDOMAIN_1 }}.zendesk.com/api/v2/apps/installations/${{ secrets.ZENDESK_APP_INSTALLATION_ID_1 }}.json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env1 failed: HTTP $HTTP_CODE"; exit 1; fi
+          echo "✅ env1 deployed"
+
+  deploy-env2:
+    needs: build
+    runs-on: ubuntu-latest
+    if: vars.DEPLOY_ENV2 == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zendesk-app
+      - name: Deploy to Zendesk (env2)
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -u "${{ secrets.ZENDESK_EMAIL_2 }}/token:${{ secrets.ZENDESK_API_TOKEN_2 }}" \
+            -F "uploaded_data=@ticket-history-app.zip" \
+            -X PUT \
+            "https://${{ secrets.ZENDESK_SUBDOMAIN_2 }}.zendesk.com/api/v2/apps/installations/${{ secrets.ZENDESK_APP_INSTALLATION_ID_2 }}.json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env2 failed: HTTP $HTTP_CODE"; exit 1; fi
+          echo "✅ env2 deployed"
+
+  deploy-env3:
+    needs: build
+    runs-on: ubuntu-latest
+    if: vars.DEPLOY_ENV3 == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zendesk-app
+      - name: Deploy to Zendesk (env3)
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -u "${{ secrets.ZENDESK_EMAIL_3 }}/token:${{ secrets.ZENDESK_API_TOKEN_3 }}" \
+            -F "uploaded_data=@ticket-history-app.zip" \
+            -X PUT \
+            "https://${{ secrets.ZENDESK_SUBDOMAIN_3 }}.zendesk.com/api/v2/apps/installations/${{ secrets.ZENDESK_APP_INSTALLATION_ID_3 }}.json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env3 failed: HTTP $HTTP_CODE"; exit 1; fi
+          echo "✅ env3 deployed"
+
+  deploy-env4:
+    needs: build
+    runs-on: ubuntu-latest
+    if: vars.DEPLOY_ENV4 == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zendesk-app
+      - name: Deploy to Zendesk (env4)
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -u "${{ secrets.ZENDESK_EMAIL_4 }}/token:${{ secrets.ZENDESK_API_TOKEN_4 }}" \
+            -F "uploaded_data=@ticket-history-app.zip" \
+            -X PUT \
+            "https://${{ secrets.ZENDESK_SUBDOMAIN_4 }}.zendesk.com/api/v2/apps/installations/${{ secrets.ZENDESK_APP_INSTALLATION_ID_4 }}.json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" != "200" ]; then echo "❌ env4 failed: HTTP $HTTP_CODE"; exit 1; fi
+          echo "✅ env4 deployed"

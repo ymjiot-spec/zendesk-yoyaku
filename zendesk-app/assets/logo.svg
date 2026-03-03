@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#6366f1"/>
+    </linearGradient>
+  </defs>
+  <!-- 背景 -->
+  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
+  <!-- チケットアイコン -->
+  <rect x="28" y="32" width="52" height="64" rx="6" fill="white" opacity="0.95"/>
+  <rect x="28" y="32" width="52" height="18" rx="6" fill="white"/>
+  <rect x="28" y="44" width="52" height="6" fill="#3b82f6" opacity="0.15"/>
+  <!-- テキスト行 -->
+  <rect x="36" y="56" width="28" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
+  <rect x="36" y="63" width="36" height="3" rx="1.5" fill="#6366f1" opacity="0.35"/>
+  <rect x="36" y="70" width="22" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
+  <rect x="36" y="77" width="32" height="3" rx="1.5" fill="#6366f1" opacity="0.35"/>
+  <rect x="36" y="84" width="26" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
+  <!-- AIスパークル -->
+  <circle cx="90" cy="44" r="22" fill="white" opacity="0.95"/>
+  <text x="90" y="42" text-anchor="middle" font-size="11" font-weight="700" fill="#6366f1" font-family="sans-serif">AI</text>
+  <text x="90" y="53" text-anchor="middle" font-size="8" fill="#3b82f6" font-family="sans-serif">要約</text>
+  <!-- スパークル -->
+  <path d="M108 28l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="white" opacity="0.8"/>
+  <path d="M72 24l1.5 4 4 1.5-4 1.5-1.5 4-1.5-4-4-1.5 4-1.5z" fill="white" opacity="0.6"/>
+</svg>

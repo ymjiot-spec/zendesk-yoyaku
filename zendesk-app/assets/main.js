@@ -795,22 +795,18 @@ async function handleCurrentTicketSummary() {
       })
     };
     
-    // 要約生成（GPT優先、フォールバックでルールベース）
-    let summary;
-    if (OPENAI_API_KEY) {
-      const ruleBase = generateModernSummary([currentTicket]);
-      const aiResult = await generateAISummary(currentTicket, ruleBase._validComments || [], ruleBase._publicComments || []);
-      if (aiResult) {
-        // AI要約で社内メモが空ならルールベースの社内メモを使う
-        if (!aiResult.privateMemo && ruleBase.privateMemo) {
-          aiResult.privateMemo = ruleBase.privateMemo;
-        }
-        summary = aiResult;
-      } else {
-        summary = ruleBase;
-      }
-    } else {
-      summary = generateModernSummary([currentTicket]);
+    // 要約生成
+    let summary = generateModernSummary([currentTicket]);
+    
+    // GPTで各コメントを要約
+    if (OPENAI_API_KEY && summary.orderedMessages && summary.orderedMessages.length > 0) {
+      const statusText = currentTicket.status ? translateStatus(currentTicket.status) : '';
+      summary.orderedMessages = await summarizeOrderedMessages(summary.orderedMessages, currentTicket.subject, statusText);
+      // brief/trendも更新
+      const fc = summary.orderedMessages.find(m => m.type === 'customer');
+      const fo = summary.orderedMessages.find(m => m.type === 'operator');
+      if (fc) summary.brief = fc.text;
+      if (fo) summary.trend = fo.text;
     }
     
     // 表示（チケットID付き）
@@ -914,21 +910,17 @@ async function handleSelectedTicketSummary() {
       comments: comments
     };
     
-    // 要約生成（GPT優先、フォールバックでルールベース）
-    let summary;
-    if (OPENAI_API_KEY) {
-      const ruleBase = generateModernSummary([ticketWithComments]);
-      const aiResult = await generateAISummary(ticketWithComments, ruleBase._validComments || [], ruleBase._publicComments || []);
-      if (aiResult) {
-        if (!aiResult.privateMemo && ruleBase.privateMemo) {
-          aiResult.privateMemo = ruleBase.privateMemo;
-        }
-        summary = aiResult;
-      } else {
-        summary = ruleBase;
-      }
-    } else {
-      summary = generateModernSummary([ticketWithComments]);
+    // 要約生成
+    let summary = generateModernSummary([ticketWithComments]);
+    
+    // GPTで各コメントを要約
+    if (OPENAI_API_KEY && summary.orderedMessages && summary.orderedMessages.length > 0) {
+      const statusText = ticketWithComments.status ? translateStatus(ticketWithComments.status) : '';
+      summary.orderedMessages = await summarizeOrderedMessages(summary.orderedMessages, ticketWithComments.subject, statusText);
+      const fc = summary.orderedMessages.find(m => m.type === 'customer');
+      const fo = summary.orderedMessages.find(m => m.type === 'operator');
+      if (fc) summary.brief = fc.text;
+      if (fo) summary.trend = fo.text;
     }
     
     // 表示（チケットID付き）
@@ -954,145 +946,59 @@ async function handleSelectedTicketSummary() {
 }
 
 /**
- * OpenAI GPTによるAI要約
+ * OpenAI GPTによるorderedMessages要約
+ * generateModernSummaryで作ったorderedMessagesの各テキストをGPTで要約する
  */
-async function generateAISummary(ticket, validComments, publicComments) {
-  const requesterId = ticket.requester_id;
-  const allComments = ticket.comments || [];
-  
-  // requester_idでお客様とオペレーターを分類
-  let customerTexts = '';
-  let operatorTexts = '';
-  let privateTexts = '';
-  let systemTexts = '';
-  
-  allComments.forEach(c => {
-    const text = stripHTML(c.value || c.body || '').trim();
-    if (text.length < 5) return;
-    
-    // システム自動コメント判定を最優先（author_idに関係なくテキスト内容で判定）
-    const isSystem = text.includes('解決済み') || text.includes('にしました') || 
-                     text.includes('次の記事') || text.includes('解決策を見つけ') ||
-                     text.includes('統合させていただきました') ||
-                     (c.via && c.via.channel === 'system');
-    
-    if (isSystem) {
-      systemTexts += text.substring(0, 100) + '\n';
-    } else if (c.public === false || c.public === 'false') {
-      privateTexts += text.substring(0, 100) + '\n';
-    } else if (requesterId && c.author_id == requesterId) {
-      customerTexts += text.substring(0, 150) + '\n';
-    } else {
-      operatorTexts += text.substring(0, 150) + '\n';
+async function summarizeOrderedMessages(orderedMessages, subject, status) {
+  // 要約対象（customer/operator/memo）を抽出
+  const targets = [];
+  orderedMessages.forEach((msg, i) => {
+    if ((msg.type === 'customer' || msg.type === 'operator' || msg.type === 'memo') && msg.text && msg.text.length > 25) {
+      const label = msg.type === 'customer' ? '客' : msg.type === 'operator' ? 'OP' : 'メモ';
+      targets.push({ idx: i, label, text: msg.text });
     }
   });
-
-  const statusText = ticket.status ? translateStatus(ticket.status) : '';
-
-  const prompt = `チケット要約。JSON形式で回答。各項目40文字以内、本質のみ。
-件名:${ticket.subject || ''} ステータス:${statusText}
-客:${customerTexts || 'なし'}
-OP:${operatorTexts || 'なし'}
-メモ:${privateTexts || 'なし'}
-経緯:${systemTexts || 'なし'}
-{"customer":"要点","operator":"要点","system":"経緯(なければ空)","memo":"要点(なければ空)"}`;
+  
+  if (targets.length === 0) return orderedMessages;
+  
+  const lines = targets.map(t => `${t.idx}|${t.label}|${t.text.substring(0, 200)}`).join('\n');
+  
+  const prompt = `通信会社コールセンターのチケット。各コメントを20文字以内で要約。挨拶・定型文・名前除去、用件の本質のみ。GB=通信量、ID=回線ID。JSON配列で回答。
+件名:${subject || ''} ステータス:${status || ''}
+${lines}
+[{"i":番号,"s":"要約"}]`;
 
   try {
     const response = await zafClient.request({
       url: 'https://api.openai.com/v1/chat/completions',
       type: 'POST',
       contentType: 'application/json',
-      headers: {
-        'Authorization': 'Bearer ' + OPENAI_API_KEY
-      },
+      headers: { 'Authorization': 'Bearer ' + OPENAI_API_KEY },
       data: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 300
+        temperature: 0,
+        max_tokens: Math.max(200, targets.length * 60)
       })
     });
 
     const content = response.choices[0].message.content.trim();
-    
-    // JSON部分を抽出
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      
-      // 時系列順メッセージ配列を生成（元コメントの順序に基づく）
-      const orderedMessages = [];
-      const seenTypes = { customer: false, operator: false, memo: false, system: false };
-      
-      allComments.forEach(c => {
-        const text = stripHTML(c.value || c.body || '').trim();
-        if (text.length < 5) return;
-        
-        const isPrivate = c.public === false || c.public === 'false';
-        // システム判定を最優先（author_idに関係なくテキスト内容で判定）
-        const isSystem = text.includes('解決済み') || text.includes('にしました') || 
-          text.includes('次の記事') || text.includes('解決策を見つけ') ||
-          text.includes('統合させていただきました') ||
-          (c.via && c.via.channel === 'system');
-        const isCustomer = !isSystem && requesterId && c.author_id == requesterId;
-        
-        let type;
-        if (isPrivate && !isSystem) {
-          type = 'memo';
-        } else if (isSystem) {
-          type = 'system';
-        } else if (isCustomer) {
-          type = 'customer';
-        } else {
-          type = 'operator';
-        }
-        
-        if (type === 'system') {
-          // システムコメントは全件そのまま表示（GPT要約に依存しない）
-          const sysText = parsed.system ? parsed.system.substring(0, 80) : text.substring(0, 80);
-          orderedMessages.push({ type: 'system', text: sysText });
-          seenTypes.system = true;
-        } else if (!seenTypes[type]) {
-          // customer/operator/memoは最初の出現のみGPT要約テキストを使用
-          seenTypes[type] = true;
-          let msgText = '';
-          if (type === 'customer') msgText = (parsed.customer || '問い合わせなし').substring(0, 80);
-          else if (type === 'operator') msgText = (parsed.operator || '返信なし').substring(0, 80);
-          else if (type === 'memo') msgText = (parsed.memo || '').substring(0, 80);
-          
-          if (msgText) {
-            orderedMessages.push({ type, text: msgText });
-          }
+      const results = JSON.parse(jsonMatch[0]);
+      const updated = [...orderedMessages];
+      results.forEach(r => {
+        if (r.i !== undefined && r.s && updated[r.i]) {
+          updated[r.i] = { ...updated[r.i], text: r.s };
         }
       });
-      
-      // コメントに含まれなかったタイプも追加（GPTが生成した場合）
-      if (!seenTypes.customer && parsed.customer) {
-        orderedMessages.unshift({ type: 'customer', text: parsed.customer.substring(0, 80) });
-      }
-      if (!seenTypes.operator && parsed.operator) {
-        orderedMessages.push({ type: 'operator', text: parsed.operator.substring(0, 80) });
-      }
-      if (!seenTypes.system && parsed.system) {
-        orderedMessages.push({ type: 'system', text: parsed.system.substring(0, 80) });
-      }
-      if (!seenTypes.memo && parsed.memo) {
-        orderedMessages.push({ type: 'memo', text: parsed.memo.substring(0, 80) });
-      }
-      
-      return {
-        brief: (parsed.customer || '問い合わせなし').substring(0, 80),
-        trend: (parsed.operator || '返信なし').substring(0, 80),
-        privateMemo: (parsed.memo || '').substring(0, 80),
-        action: '',
-        orderedMessages
-      };
+      return updated;
     }
   } catch (error) {
-    console.error('GPT要約エラー:', error);
+    console.error('GPTメッセージ要約エラー:', error);
   }
   
-  return null; // 失敗時はnullを返す → ルールベースにフォールバック
+  return orderedMessages; // 失敗時はそのまま返す
 }
 
 /**
@@ -1298,15 +1204,18 @@ function generateModernSummary(tickets) {
       if (rawText.length < 5) return;
       
       const isPrivate = c.public === false || c.public === 'false';
-      // システム判定を最優先（author_idに関係なくテキスト内容で判定）
-      const isSystem = rawText.includes('解決済み') || rawText.includes('にしました') || 
+      const isMerge = rawText.includes('統合させていただきました');
+      const isSystem = !isMerge && (rawText.includes('解決済み') || rawText.includes('にしました') || 
         rawText.includes('次の記事') || rawText.includes('解決策を見つけ') ||
-        rawText.includes('統合させていただきました') ||
-        (c.via && c.via.channel === 'system');
-      const isCustomer = !isSystem && requesterId && c.author_id == requesterId;
+        (c.via && c.via.channel === 'system'));
+      const isCustomer = !isSystem && !isMerge && requesterId && c.author_id == requesterId;
       
       let type, text;
-      if (isPrivate && !isSystem) {
+      if (isMerge) {
+        type = 'memo';
+        const ticketMatch = rawText.match(/#(\d{4,})/);
+        text = ticketMatch ? `#${ticketMatch[1]} を統合` : 'チケット統合';
+      } else if (isPrivate && !isSystem) {
         type = 'memo';
         text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
       } else if (isSystem) {
