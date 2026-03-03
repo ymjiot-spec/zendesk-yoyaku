@@ -1199,7 +1199,7 @@ function generateModernSummary(tickets) {
       return cleaned;
     };
     
-    ticket.comments.forEach(c => {
+    ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
       if (rawText.length < 1) return;
       
@@ -1212,7 +1212,8 @@ function generateModernSummary(tickets) {
         isSystemChannel);
       
       // author_idとrequester_idを数値に変換して比較
-      const authorId = Number(c.author_id);
+      // author_idがない場合、最初のコメントはrequester（お客様）と仮定
+      const authorId = c.author_id ? Number(c.author_id) : (idx === 0 ? Number(requesterId) : 0);
       const reqId = Number(requesterId);
       const isCustomerAuthor = reqId > 0 && authorId === reqId;
       
