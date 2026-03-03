@@ -1205,34 +1205,40 @@ function generateModernSummary(tickets) {
       
       const isPrivate = c.public === false || c.public === 'false';
       const isMerge = rawText.includes('統合させていただきました');
+      const isSelfSolved = rawText.includes('解決策を見つけ') || rawText.includes('記事に');
+      const isSystemChannel = c.via && c.via.channel === 'system';
       const isSystem = !isMerge && (rawText.includes('解決済み') || rawText.includes('にしました') || 
-        rawText.includes('次の記事') || rawText.includes('解決策を見つけ') ||
-        (c.via && c.via.channel === 'system'));
-      const isCustomer = !isSystem && !isMerge && requesterId && c.author_id == requesterId && !isPrivate;
+        rawText.includes('次の記事') || isSelfSolved ||
+        isSystemChannel);
+      
+      // author_idとrequester_idを数値に変換して比較
+      const authorId = Number(c.author_id);
+      const reqId = Number(requesterId);
+      const isCustomerAuthor = reqId > 0 && authorId === reqId;
       
       let type, text;
       if (isMerge) {
         type = 'memo';
         const ticketMatch = rawText.match(/#(\d{4,})/);
         text = ticketMatch ? `#${ticketMatch[1]} を統合` : 'チケット統合';
-      } else if (isPrivate && !isSystem) {
-        type = 'memo';
-        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
       } else if (isSystem) {
         type = 'system';
         text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
-      } else if (isCustomer) {
+      } else if (isPrivate) {
+        type = 'memo';
+        text = rawText.substring(0, 60) + (rawText.length > 60 ? '...' : '');
+      } else if (isCustomerAuthor) {
         type = 'customer';
         const cleaned = cleanText(rawText);
         text = (cleaned.length > 0 ? cleaned : rawText).substring(0, 80);
         if (text.length === 0) return;
-        text = text + ((cleaned.length > 80 || rawText.length > 80) ? '...' : '');
+        if (cleaned.length > 80 || rawText.length > 80) text += '...';
       } else {
         type = 'operator';
         const cleaned = cleanText(rawText);
         text = (cleaned.length > 0 ? cleaned : rawText).substring(0, 80);
         if (text.length === 0) return;
-        text = text + ((cleaned.length > 80 || rawText.length > 80) ? '...' : '');
+        if (cleaned.length > 80 || rawText.length > 80) text += '...';
       }
       
       orderedMessages.push({ type, text });
