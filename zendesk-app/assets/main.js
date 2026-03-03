@@ -1199,18 +1199,8 @@ function generateModernSummary(tickets) {
     return cleaned;
   };
   
-  // descriptionを最初のお客様メッセージとして追加（commentsに含まれてない場合）
-  if (ticket.description) {
-    const descText = stripHTML(ticket.description).trim();
-    if (descText.length > 0) {
-      const cleaned = cleanText(descText);
-      const text = (cleaned.length > 0 ? cleaned : descText).substring(0, 80) + (descText.length > 80 ? '...' : '');
-      orderedMessages.push({ type: 'customer', text: text });
-    }
-  }
-  
+  // コメントから顧客メッセージを抽出（最初のコメントが顧客の問い合わせ内容）
   if (ticket.comments && ticket.comments.length > 0) {
-    
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
       if (rawText.length < 1) return;
