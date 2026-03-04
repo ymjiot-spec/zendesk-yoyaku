@@ -1304,6 +1304,9 @@ function displayModernSummary(summary, ticketId) {
     ? summary.orderedMessages
     : buildFallbackMessages(summary);
   
+  console.log('=== displayModernSummary ===');
+  console.log('orderedMessages:', JSON.stringify(messages));
+  
   messages.forEach(msg => {
     if (!msg.text) return;
     
