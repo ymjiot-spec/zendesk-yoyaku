@@ -1,5 +1,5 @@
 {
-  "name": "Ticket History App",
+  "name": "要約アプリ",
   "author": {
     "name": "Your Company",
     "email": "support@example.com"
@@ -14,8 +14,10 @@
       }
     }
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "frameworkVersion": "2.0",
+  "singleInstall": true,
+  "signedUrls": false,
   "parameters": [
     {
       "name": "api_endpoint",
