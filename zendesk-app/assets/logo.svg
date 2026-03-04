@@ -1,27 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#3b82f6"/>
-      <stop offset="100%" style="stop-color:#6366f1"/>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <!-- 背景 -->
-  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
-  <!-- チケットアイコン -->
-  <rect x="28" y="32" width="52" height="64" rx="6" fill="white" opacity="0.95"/>
-  <rect x="28" y="32" width="52" height="18" rx="6" fill="white"/>
-  <rect x="28" y="44" width="52" height="6" fill="#3b82f6" opacity="0.15"/>
-  <!-- テキスト行 -->
-  <rect x="36" y="56" width="28" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
-  <rect x="36" y="63" width="36" height="3" rx="1.5" fill="#6366f1" opacity="0.35"/>
-  <rect x="36" y="70" width="22" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
-  <rect x="36" y="77" width="32" height="3" rx="1.5" fill="#6366f1" opacity="0.35"/>
-  <rect x="36" y="84" width="26" height="3" rx="1.5" fill="#3b82f6" opacity="0.5"/>
-  <!-- AIスパークル -->
-  <circle cx="90" cy="44" r="22" fill="white" opacity="0.95"/>
-  <text x="90" y="42" text-anchor="middle" font-size="11" font-weight="700" fill="#6366f1" font-family="sans-serif">AI</text>
-  <text x="90" y="53" text-anchor="middle" font-size="8" fill="#3b82f6" font-family="sans-serif">要約</text>
-  <!-- スパークル -->
-  <path d="M108 28l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="white" opacity="0.8"/>
-  <path d="M72 24l1.5 4 4 1.5-4 1.5-1.5 4-1.5-4-4-1.5 4-1.5z" fill="white" opacity="0.6"/>
+  <!-- 背景円 -->
+  <circle cx="64" cy="64" r="60" fill="url(#grad1)"/>
+  <!-- 文書アイコン -->
+  <rect x="35" y="25" width="45" height="55" rx="4" fill="white" opacity="0.95"/>
+  <!-- 文書の線 -->
+  <line x1="42" y1="38" x2="72" y2="38" stroke="#667eea" stroke-width="3" stroke-linecap="round"/>
+  <line x1="42" y1="48" x2="68" y2="48" stroke="#667eea" stroke-width="3" stroke-linecap="round"/>
+  <line x1="42" y1="58" x2="65" y2="58" stroke="#667eea" stroke-width="3" stroke-linecap="round"/>
+  <line x1="42" y1="68" x2="60" y2="68" stroke="#667eea" stroke-width="3" stroke-linecap="round"/>
+  <!-- AIスパークル/星 -->
+  <g fill="#FFD700">
+    <polygon points="95,35 97,41 103,41 98,45 100,51 95,47 90,51 92,45 87,41 93,41" />
+    <polygon points="85,65 86.5,69 91,69 87.5,72 89,76 85,73 81,76 82.5,72 79,69 83.5,69" transform="scale(0.8) translate(15,10)"/>
+    <polygon points="100,75 101,78 104,78 101.5,80 102.5,83 100,81 97.5,83 98.5,80 96,78 99,78" />
+  </g>
+  <!-- AI文字 -->
+  <text x="88" y="58" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="white">AI</text>
 </svg>
