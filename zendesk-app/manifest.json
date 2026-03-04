@@ -10,10 +10,12 @@
     "support": {
       "ticket_sidebar": {
         "url": "assets/index.html",
-        "flexible": true
+        "flexible": true,
+        "autoLoad": true
       }
     }
   },
+  "defaultIcon": "assets/logo.svg",
   "version": "1.0.1",
   "frameworkVersion": "2.0",
   "singleInstall": true,
