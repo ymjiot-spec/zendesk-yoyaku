@@ -1211,11 +1211,13 @@ function generateModernSummary(tickets) {
   
   // コメントから顧客メッセージを抽出
   let foundFirstPublic = false;
+  let descriptionText = ''; // descriptionのテキストを保存（重複チェック用）
   
   // まずdescriptionを最初の顧客メッセージとして追加（コメントAPIに含まれない場合があるため）
   if (ticket.description) {
     const descText = stripHTML(ticket.description).trim();
     if (descText.length > 0) {
+      descriptionText = descText; // 重複チェック用に保存
       const cleaned = cleanText(descText);
       const text = (cleaned.length > 0 ? cleaned : descText).substring(0, 80) + (descText.length > 80 ? '...' : '');
       orderedMessages.push({ type: 'customer', text: text });
@@ -1227,6 +1229,9 @@ function generateModernSummary(tickets) {
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
       if (rawText.length < 1) return;
+      
+      // descriptionと同じ内容のコメントはスキップ（重複防止）
+      if (descriptionText && rawText === descriptionText) return;
       
       // publicフィールドの判定（undefined/nullはpublicとみなす）
       const isPrivate = c.public === false;
@@ -1307,6 +1312,8 @@ function displayModernSummary(summary, ticketId) {
   
   console.log('=== displayModernSummary ===');
   console.log('orderedMessages:', JSON.stringify(messages));
+  console.log('summary.brief:', summary.brief);
+  console.log('summary全体:', JSON.stringify(summary));
   
   messages.forEach(msg => {
     if (!msg.text) return;
