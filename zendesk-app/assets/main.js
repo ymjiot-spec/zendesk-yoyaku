@@ -738,6 +738,8 @@ async function handleCurrentTicketSummary() {
         type: 'GET'
       });
       comments = commentsResponse.comments || [];
+      // デバッグ: コメント内容を確認
+      alert('コメント数: ' + comments.length + '\n' + comments.map((c, i) => i + ': public=' + c.public + ', text=' + (c.body || c.plain_body || '').substring(0, 30)).join('\n'));
     } catch (error) {
       if (ticketData['ticket.comments']) {
         comments = ticketData['ticket.comments'];
