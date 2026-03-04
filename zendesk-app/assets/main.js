@@ -738,8 +738,6 @@ async function handleCurrentTicketSummary() {
         type: 'GET'
       });
       comments = commentsResponse.comments || [];
-      // デバッグ: コメント内容を確認
-      alert('コメント数: ' + comments.length + '\n' + comments.map((c, i) => i + ': public=' + c.public + ', text=' + (c.body || c.plain_body || '').substring(0, 30)).join('\n'));
     } catch (error) {
       if (ticketData['ticket.comments']) {
         comments = ticketData['ticket.comments'];
@@ -1203,6 +1201,18 @@ function generateModernSummary(tickets) {
   
   // コメントから顧客メッセージを抽出
   let foundFirstPublic = false;
+  
+  // まずdescriptionを最初の顧客メッセージとして追加（コメントAPIに含まれない場合があるため）
+  if (ticket.description) {
+    const descText = stripHTML(ticket.description).trim();
+    if (descText.length > 0) {
+      const cleaned = cleanText(descText);
+      const text = (cleaned.length > 0 ? cleaned : descText).substring(0, 80) + (descText.length > 80 ? '...' : '');
+      orderedMessages.push({ type: 'customer', text: text });
+      foundFirstPublic = true;
+    }
+  }
+  
   if (ticket.comments && ticket.comments.length > 0) {
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
