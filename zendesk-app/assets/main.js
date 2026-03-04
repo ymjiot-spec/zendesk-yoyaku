@@ -1199,7 +1199,8 @@ function generateModernSummary(tickets) {
     return cleaned;
   };
   
-  // コメントから顧客メッセージを抽出（最初のコメントが顧客の問い合わせ内容）
+  // コメントから顧客メッセージを抽出
+  let foundFirstPublic = false;
   if (ticket.comments && ticket.comments.length > 0) {
     ticket.comments.forEach((c, idx) => {
       const rawText = stripHTML(c.value || c.body || c.plain_body || '').trim();
@@ -1208,19 +1209,21 @@ function generateModernSummary(tickets) {
       // publicフィールドの判定（undefined/nullはpublicとみなす）
       const isPrivate = c.public === false;
       const isMerge = rawText.includes('統合させていただきました');
+      const isAutoMemo = rawText.includes('顧客メモ（自動投稿）');
       const isSelfSolved = rawText.includes('解決策を見つけ') || rawText.includes('記事に');
       const isSystemChannel = c.via && c.via.channel === 'system';
-      const isAutoMemo = rawText.includes('顧客メモ（自動投稿）');
       const isSystem = !isMerge && !isAutoMemo && (rawText.includes('解決済み') || rawText.includes('にしました') || 
-        rawText.includes('次の記事') || isSelfSolved ||
-        isSystemChannel);
+        rawText.includes('次の記事') || isSelfSolved || isSystemChannel);
       
       // author_idとrequester_idを数値に変換して比較
       const authorId = c.author_id ? Number(c.author_id) : 0;
       const reqId = requesterId ? Number(requesterId) : 0;
-      // 最初のpublicコメントは必ず顧客メッセージ、またはauthor_id == requester_id
-      const isFirstPublicComment = idx === 0 && !isPrivate;
-      const isCustomerAuthor = isFirstPublicComment || (reqId > 0 && authorId === reqId);
+      
+      // 最初のpublicコメントを顧客メッセージとして扱う
+      const isFirstPublic = !isPrivate && !foundFirstPublic && !isAutoMemo && !isSystem && !isMerge;
+      if (isFirstPublic) foundFirstPublic = true;
+      
+      const isCustomerAuthor = isFirstPublic || (reqId > 0 && authorId === reqId && !isPrivate);
       
       let type, text;
       if (isMerge) {
