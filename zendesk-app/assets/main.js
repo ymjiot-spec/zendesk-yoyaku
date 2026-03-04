@@ -781,17 +781,26 @@ async function handleCurrentTicketSummary() {
       // Audits API失敗は無視
     }
     
+    // descriptionが空の場合、最初のpublicコメントをdescriptionとして使用
+    let description = ticketData['ticket.description'] || '';
+    if (!description && comments.length > 0) {
+      const firstPublic = comments.find(c => c.public !== false);
+      if (firstPublic) {
+        description = firstPublic.body || firstPublic.plain_body || firstPublic.value || '';
+      }
+    }
+    
     const currentTicket = {
       id: ticketId,
       subject: ticketData['ticket.subject'],
-      description: ticketData['ticket.description'],
+      description: description,
       status: ticketData['ticket.status'],
       created_at: ticketData['ticket.createdAt'],
       comments: comments,
       requester_id: requesterId,
       riskAnalysis: analyzeTicketRisk({
         subject: ticketData['ticket.subject'],
-        description: ticketData['ticket.description']
+        description: description
       })
     };
     
